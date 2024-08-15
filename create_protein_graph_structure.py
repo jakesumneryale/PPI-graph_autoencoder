@@ -7,13 +7,17 @@ from Bio.PDB import PDBIO
 import os
 from os import listdir
 from os.path import isfile, join, isdir
-from sklearn import metrics
 from numpy.linalg import norm
-from scipy.stats import spearmanr, pearsonr, kendalltau
 from scipy.spatial import distance_matrix
 import pickle
-import re
+import argparse
 
+
+## Initialize Parser
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--file", "-f", help="The name of the PDB file to be read in")
+parser.add_argument("--output_file", "-o", help="The name of the output file to save the data to")
 
 ##########################################
 ####### GRAPH GENERATION FUNCTIONS #######
@@ -530,6 +534,12 @@ def main():
 	Runs the code
 	'''
 
+	## Parse arguments
+
+	args = parser.parse_args()
+	pdb_name = args.pdb
+	file_indicator = args.file_indicator
+	run_num = args.i
 
 	## Load in the data
 
