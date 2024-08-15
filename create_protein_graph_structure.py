@@ -11,13 +11,16 @@ from numpy.linalg import norm
 from scipy.spatial import distance_matrix
 import pickle
 import argparse
+from glob import glob 
+import h5py
 
 
 ## Initialize Parser
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--file", "-f", help="The name of the PDB file to be read in")
+parser.add_argument("--directory", "-d", help="The name of the directory containing the PDB files to be read in")
 parser.add_argument("--output_file", "-o", help="The name of the output file to save the data to")
+parser.add_argument("--file_indicator", "-fi", default = "", help="The fragment of the file that is used by glob to identify the files in the directory")
 
 ##########################################
 ####### GRAPH GENERATION FUNCTIONS #######
@@ -557,6 +560,23 @@ def generate_node_features(adj_mat, aa_list, chain1_len, chain2_len):
 	return feature_arr
 
 
+def save_file_to_hdf5_group(hdf_file, pdb_filename, adj_mat, graph_node_features):
+	'''
+	Takes the pdb_filename and creates a new group in the hdf_file with that name.
+	Then the code adds subfolders for the "A" (adjacency matrix) and "X" (node features), 
+	to the initial group so that we can have all the data for each target in the same spot. 
+	'''
+
+	group_name = pdb_filename.split(".")[0]
+
+	new_group = hdf_file.create_group(group_name)
+
+	new_group.create_dataset("A", data=adj_mat)
+	new_group.create_dataset("X", data=graph_node_features)
+
+	return
+
+
 def main():
 	'''
 	Runs the code
@@ -565,31 +585,49 @@ def main():
 	## Parse arguments
 
 	args = parser.parse_args()
-	pdb_name = args.pdb
+	pdb_dir = args.directory
+	save_file_name = args.output_file
 	file_indicator = args.file_indicator
-	run_num = args.i
 
 	## Load in the data
 
-	pdb_dir = "/Users/jakesumner/Desktop/PPI Project/supersampling/pdb_targets_ethan"
+	os.chdir(pdb_dir)
 
-	pdb_name = "2grn_complex_H.pdb"
+	pdb_files = glob(f"*{file_indicator}*")
+
+	print(pdb_files)
+
+	## Open a new HDF5 file to save the data to
+
+	hdf_file = h5py.File(save_file_name, "w")
 
 
-	## Create the coordinates and the adjacency matrix
+	## loop through all the PDBs in the directory
 
-	dimer_ca, dimer_ha, aa_list = get_protein_coords(pdb_name, pdb_dir)
+	for pdb_filename in pdb_files:
 
-	dimer_adj_mat = create_adjacency_matrix(dimer_ha)
 
-	## Create the node features for the graph
+		## Create the coordinates and the adjacency matrix
 
-	chain1_len = len(dimer_ca[0])
-	chain2_len = len(dimer_ca[1])
+		dimer_ca, dimer_ha, aa_list = get_protein_coords(pdb_filename, pdb_dir)
 
-	graph_node_features = generate_node_features(dimer_adj_mat, aa_list, chain1_len, chain2_len)
+		dimer_adj_mat = create_adjacency_matrix(dimer_ha)
 
-	## Save the graph somehow...
+		## Create the node features for the graph
+
+		chain1_len = len(dimer_ca[0])
+		chain2_len = len(dimer_ca[1])
+
+		graph_node_features = generate_node_features(dimer_adj_mat, aa_list, chain1_len, chain2_len)
+
+		## Save data as an HDF5 dataset file
+
+		save_file_to_hdf5_group(hdf_file, pdb_filename, dimer_adj_mat, graph_node_features)
+
+
+	## Close the file
+
+	hdf_file.close()
 
 
 
@@ -601,6 +639,9 @@ def main():
 	# create_pdb_from_ca_coords(dimer_ca, dimer_adj_mat, "2grn_graph",edge_type = "intrachain")
 	# create_pdb_from_ca_coords(dimer_ca, dimer_adj_mat, "2grn_graph",edge_type = "interface")
 
+
+if __name__ == '__main__':
+	main()
 
 
 
