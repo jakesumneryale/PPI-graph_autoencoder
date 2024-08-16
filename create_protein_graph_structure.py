@@ -20,6 +20,7 @@ import h5py
 parser = argparse.ArgumentParser()
 parser.add_argument("--directory", "-d", help="The name of the directory containing the PDB files to be read in")
 parser.add_argument("--output_file", "-o", help="The name of the output file to save the data to")
+parser.add_argument("--output_dir", "-od", default = ".", help="The directory where the output file will be saved")
 parser.add_argument("--file_indicator", "-fi", default = "", help="The fragment of the file that is used by glob to identify the files in the directory")
 
 ##########################################
@@ -71,7 +72,7 @@ def get_protein_coords(pdb_name, pdb_dir):
 
 	## Get the target structure 
 	
-	heterodimer = pdb_parser.get_structure(pdb_name.split(".")[0], pdb_name)
+	heterodimer = pdb_parser.get_structure(pdb_name.split(".pd")[0], pdb_name)
 	het_model = heterodimer[0]
 	
 	dimer_ca = []
@@ -567,7 +568,7 @@ def save_file_to_hdf5_group(hdf_file, pdb_filename, adj_mat, graph_node_features
 	to the initial group so that we can have all the data for each target in the same spot. 
 	'''
 
-	group_name = pdb_filename.split(".")[0]
+	group_name = pdb_filename.split(".pd")[0]
 
 	new_group = hdf_file.create_group(group_name)
 
@@ -588,6 +589,7 @@ def main():
 	pdb_dir = args.directory
 	save_file_name = args.output_file
 	file_indicator = args.file_indicator
+	save_file_dir = args.output_dir
 
 	## Load in the data
 
@@ -595,9 +597,10 @@ def main():
 
 	pdb_files = glob(f"*{file_indicator}*")
 
-	print(pdb_files)
 
 	## Open a new HDF5 file to save the data to
+
+	os.chdir(save_file_dir)
 
 	hdf_file = h5py.File(save_file_name, "w")
 
