@@ -51,6 +51,291 @@ aa_three_to_one = {
 	'VAL': 'V',  # Valine
 }
 
+atomic_radius_dict = {
+    "N" : 1.3,
+    "CA" : 1.5,
+    "C" : 1.5, 
+    "CB" : 1.5,
+    "CG" : 1.5,
+    "CD" : 1.5,
+    "O" : 1.4,
+    "CO" : 1.3,
+    "S" : 1.75,
+    "Se" : 1.9,
+    "H" : 1.0,
+    "H1" : 1.1,
+    "H2" : 1.1,
+    "H3" : 1.1,
+    "CD1" : 1.5,
+    "CD2" : 1.5,
+    "CE" : 1.5,
+    "CE1" : 1.5,
+    "CE2" : 1.5,
+    "CE3" : 1.5,
+    "CG1" : 1.5,
+    "CG2" : 1.5,
+    "CH2" : 1.5,
+    "CZ" : 1.5,
+    "CZ2" : 1.5,
+    "CZ3" : 1.5,
+    "ND1" : 1.3,
+    "ND2" : 1.3,
+    "NE" : 1.3,
+    "NE1" : 1.3,
+    "NE2" : 1.3,
+    "NH1" : 1.3,
+    "NH2" : 1.3,
+    "NZ" : 1.3,
+    "OD1" : 1.4,
+    "OD2" : 1.4,
+    "OE1" : 1.4,
+    "OE2" : 1.4,
+    "OG" : 1.4,
+    "OG1" : 1.4,
+    "OH" : 1.4,
+    "OXT" : 1.4,
+    "SD" : 1.75,
+    "SG" : 1.75
+}
+
+def get_protein_information(pdb_name, pdb_dir):
+    '''
+    Gets all the information for a protein and
+    stores it in a pandas dataframe. This includes
+    all atoms, their names, radii, coordinates, and 
+    which chain they are in 
+    '''
+
+    ## Load in global dictionaries
+    
+    global aa_three_to_one
+    global atomic_radius_dict
+    
+    os.chdir(pdb_dir)
+    
+    ## Init the pdb parser
+    
+    pdb_parser = Bio.PDB.PDBParser(QUIET = True)
+
+    ## Get the target structure 
+    
+    heterodimer = pdb_parser.get_structure(pdb_name.split(".")[0], pdb_name)
+    het_model = heterodimer[0]
+    
+    amino_acid_id = []
+    amino_acid_name = []
+    chain_id = []
+    atom_name = []
+    atom_radius = []
+    atomic_x = []
+    atomic_y = []
+    atomic_z = []
+    ca_bool = []
+    ha_bool = []
+    hyd_bool = []
+    
+    first_chain_bool = True
+    chain_count = 1
+    residue_count = 0
+    
+    for chain in het_model:
+    
+        for residue in chain:
+            
+            for atom in residue:
+                
+                ## Save the chain ID
+                chain_id.append(chain_count)
+        
+                ## Save the amino acid name
+                amino_acid_name.append(aa_three_to_one[residue.get_resname()])
+
+                ## Save the amino acid ID
+                amino_acid_id.append(residue_count)
+                
+                ## Save the atom name
+                curr_atom_name = atom.get_name()
+                atom_name.append(curr_atom_name)
+                
+                ## Save the amino acid coords
+                temp_coords = list(atom.get_coord())
+                atomic_x.append(temp_coords[0])
+                atomic_y.append(temp_coords[1])
+                atomic_z.append(temp_coords[2])
+                
+                ## Specify C-alpha
+                if "CA" in curr_atom_name:
+                    ca_bool.append(1)
+                    ha_bool.append(1)
+                    hyd_bool.append(0)
+                    
+                    atom_radius.append(1.5) ## c-alpha radius
+                    
+                ## Specify Heavy Atom
+                elif "H" not in curr_atom_name[0] and curr_atom_name[0] not in ["1", "2", "3", "4"]:
+                    ca_bool.append(0)
+                    ha_bool.append(1)
+                    hyd_bool.append(0)
+                    
+                    ## Save the atomic radius for the heavy atoms
+                    if curr_atom_name in atomic_radius_dict:
+                        atom_radius.append(atomic_radius_dict[curr_atom_name])
+                        
+                    else:
+                        atom_radius.append(6969)
+                    
+                ## Specify Hydrogen
+                else:
+                    ca_bool.append(0)
+                    ha_bool.append(0)
+                    hyd_bool.append(1)
+                    
+                    if curr_atom_name == "H":
+                        atom_radius.append(1.0) ## normal hydrogen
+                        
+                    else:
+                        atom_radius.append(1.1) ## slightly larger hydrogen
+                        
+            residue_count += 1
+                            
+        
+        ## Increment the chain ID
+        chain_count += 1
+        
+        
+    ## Create dataframe from information
+    
+    protein_dict = {
+        "chain_id" : chain_id,
+        "aa_id" : amino_acid_id,
+        "aa_name" : amino_acid_name,
+        "atom_name" : atom_name,
+        "atom_radius" : atom_radius,
+        "x_coord" : atomic_x, 
+        "y_coord" : atomic_y, 
+        "z_coord" : atomic_z, 
+        "ca_bool" : ca_bool,
+        "ha_bool" : ha_bool, 
+        "hyd_bool" : hyd_bool 
+    }
+    
+    protein_df = pd.DataFrame(protein_dict)
+    
+    return protein_df
+
+def get_ca_coords(protein_df):
+    '''
+    Returns a list of c-alpha
+    coordinates in the protein_df. 
+    The coordinates are in 2 numpy arrays, one
+    for each protein monomer. 
+    '''
+    
+    chain_1_df = protein_df[protein_df["chain_id"] == 1]
+    chain_2_df = protein_df[protein_df["chain_id"] == 2]
+    
+    chain_1_ca = chain_1_df[chain_1_df["ca_bool"] == 1]
+    chain_2_ca = chain_2_df[chain_2_df["ca_bool"] == 1]
+    
+    chain_1_len = len(chain_1_ca)
+    chain_2_len = len(chain_2_ca)
+    
+    chain_1_coords = np.zeros((chain_1_len, 3))
+    chain_2_coords = np.zeros((chain_2_len, 3))
+    
+    ## Fill in chain 1 coords
+    
+    chain_1_coords[:, 0] = chain_1_ca["x_coord"]
+    chain_1_coords[:, 1] = chain_1_ca["y_coord"]
+    chain_1_coords[:, 2] = chain_1_ca["z_coord"]
+    
+    ## Fill in chain 2 coords
+    
+    chain_2_coords[:, 0] = chain_2_ca["x_coord"]
+    chain_2_coords[:, 1] = chain_2_ca["y_coord"]
+    chain_2_coords[:, 2] = chain_2_ca["z_coord"]
+    
+    return [chain_1_coords, chain_2_coords]
+
+
+def get_ha_coords(protein_df):
+    '''
+    Separates the protein into a list with the following structure:
+    [chain [amino acid [coords for amino acid]]]
+    
+    The amino acids coords are a numpy array
+    '''
+    
+    chain_1_df = protein_df[protein_df["chain_id"] == 1]
+    chain_2_df = protein_df[protein_df["chain_id"] == 2]
+    
+    chain_1_coords = []
+    
+    ## Loop through chain 1 amino acids
+    
+    max_num_1 = np.max(chain_1_df["aa_id"])+1
+    
+    for i in range(max_num_1):
+        
+        ## Get the amino acid
+        temp_aa_df = chain_1_df[chain_1_df["aa_id"] == i]
+        
+        temp_aa_ha_df = temp_aa_df[temp_aa_df["ha_bool"] == 1]
+        
+        temp_aa_coords = np.zeros((len(temp_aa_ha_df), 3))
+        
+        ## Add the coords to the array
+        
+        temp_aa_coords[:, 0] = temp_aa_ha_df["x_coord"]
+        temp_aa_coords[:, 1] = temp_aa_ha_df["y_coord"]
+        temp_aa_coords[:, 2] = temp_aa_ha_df["z_coord"]
+        
+        chain_1_coords.append(temp_aa_coords)
+        
+    
+    ## Loop through chain 2 amino acids
+    
+    chain_2_coords = []
+    
+    max_num_2 = np.max(chain_2_df["aa_id"])+1
+    
+    for i in range(max_num_1, max_num_2):
+                
+        ## Get the amino acid
+        temp_aa_df = chain_2_df[chain_2_df["aa_id"] == i]
+        
+        temp_aa_ha_df = temp_aa_df[temp_aa_df["ha_bool"] == 1]
+        
+        temp_aa_coords = np.zeros((len(temp_aa_ha_df), 3))
+        
+        ## Add the coords to the array
+        
+        temp_aa_coords[:, 0] = temp_aa_ha_df["x_coord"]
+        temp_aa_coords[:, 1] = temp_aa_ha_df["y_coord"]
+        temp_aa_coords[:, 2] = temp_aa_ha_df["z_coord"]
+        
+        chain_2_coords.append(temp_aa_coords)
+        
+    return [chain_1_coords, chain_2_coords]
+
+def get_aa_list(protein_df):
+    '''
+    Simply gets a list of the amino acids
+    in the protein, in order, not separated by
+    chain at all
+    '''
+    
+    aa_list = []
+    
+    
+    num_max = np.max(protein_df["aa_id"])+1
+    
+    for i in range(num_max):
+        
+        aa_list.append(protein_df[protein_df["aa_id"] == i]["aa_name"].iloc[0])
+        
+    return aa_list
+
 def get_protein_coords(pdb_name, pdb_dir):
 	'''
 	Gets the coordinates of the c-alpha and 
@@ -58,6 +343,8 @@ def get_protein_coords(pdb_name, pdb_dir):
 	for each amino acids in the protein entered.
 	
 	Each chain will be separated into it's own list as well. 
+
+	Essentially deprecated now
 	'''
 
 	## Load in global dictionary
