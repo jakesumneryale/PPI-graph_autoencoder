@@ -13,6 +13,12 @@ import pickle
 import argparse
 from glob import glob 
 import h5py
+import freesasa
+
+## Local imports from the rest of the code scripts
+
+from standalone_freesasa_rsasa_code import atomic_radius_dict
+from standalone_freesasa_rsasa_code import calculate_sasa_protein, calculate_residue_sasa_protein, calculate_residue_sasa_solvent
 
 
 ## Initialize Parser
@@ -21,7 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--directory", "-d", help="The name of the directory containing the PDB files to be read in")
 parser.add_argument("--output_file", "-o", help="The name of the output file to save the data to")
 parser.add_argument("--output_dir", "-od", default = ".", help="The directory where the output file will be saved")
-parser.add_argument("--file_indicator", "-fi", default = "", help="The fragment of the file that is used by glob to identify the files in the directory")
+parser.add_argument("--file_indicator", "-fi", default = ".pdb", help="The fragment of the file that is used by glob to identify the files in the directory")
 
 ##########################################
 ####### GRAPH GENERATION FUNCTIONS #######
@@ -848,6 +854,70 @@ def generate_node_features(adj_mat, aa_list, chain1_len, chain2_len):
 	return feature_arr
 
 
+def calculate_rsasa_for_protein(protein_df, nslices = 100, probe_radius = 1.4, save_file = False, save_dir = "./", pdb_file = ""):
+	'''
+	Calculate the rSASA for each amino acid
+	in the protein. Returns the dataframe of the 
+	SASA and rSASA information. You can change
+	the probe-radius and the nslices used
+	by the Lee-Richards algorithm.
+	SASA calculated using FreeSASA. 
+
+	If you want to save the file, turn save_file to True,
+	specfiy a save_dir, and specify a PDB file so the saved
+	file can be properly named. 
+	'''
+
+	## Specific the parameters 
+
+	new_params = freesasa.Parameters.defaultParameters
+
+	new_params["n-slices"] = nslices
+	new_params["probe-radius"] = probe_radius
+
+	new_params = freesasa.Parameters(new_params)
+
+	## Get the SASA for the protein
+
+	calculate_sasa_protein(protein_df, new_params)
+
+	res_sasa = calculate_residue_sasa_protein(protein_df)
+
+	## Get the SASA for the solvated dipeptides
+
+	sol_sasa = calculate_residue_sasa_solvent(protein_df, new_params)
+
+	## Get the rSASA
+
+	rsasa_vals = res_sasa/sol_sasa
+
+	## Create dataframe and organize easily
+
+	rsasa_df = pd.DataFrame()
+
+	rsasa_df["residue_name"] = get_aa_list(protein_df)
+
+	rsasa_df["SASA_protein"] = res_sasa 
+
+	rsasa_df["SASA_dipep"] = sol_sasa
+
+	rsasa_df["rSASA"] = rsasa_vals
+
+	if save_file:
+
+		os.chdir(save_dir)
+
+		save_filename = pdb_file.split(".pd")[0] + "_sasa_data.csv"
+
+		rsasa_df.to_csv(save_filename)
+
+	return rsasa_df
+
+
+###################
+### File Saving ###
+###################
+
 def save_file_to_hdf5_group(hdf_file, pdb_filename, adj_mat, graph_node_features):
 	'''
 	Takes the pdb_filename and creates a new group in the hdf_file with that name.
@@ -910,6 +980,12 @@ def main():
 
 		graph_node_features = generate_node_features(dimer_adj_mat, aa_list, chain1_len, chain2_len)
 
+		## Run the rSASA code
+
+		protein_df = get_protein_information(pdb_filename, pdb_dir)
+
+		rsasa_df = calculate_rsasa_for_protein(protein_df, save_file = True, save_dir = save_file_dir, pdb_file = pdb_filename)
+
 		## Save data as an HDF5 dataset file
 
 		save_file_to_hdf5_group(hdf_file, pdb_filename, dimer_adj_mat, graph_node_features)
@@ -918,8 +994,6 @@ def main():
 	## Close the file
 
 	hdf_file.close()
-
-
 
 	## Save the created graph structure as PDB files
 
