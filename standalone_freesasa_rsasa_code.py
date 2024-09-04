@@ -54,8 +54,10 @@ atomic_radius_dict = {
 	'Y': {'N': 1.3, 'CA': 1.5, 'C': 1.3, 'O': 1.4, 'CB': 1.5, 'CG': 1.5, 'CD1': 1.5, 'CD2': 1.5, 'CE1': 1.5, 'CE2': 1.5, 'CZ': 1.5, 'OH': 1.4, 'H': 1.0, 'HA': 1.1, 'HB2': 1.1, 'HB3': 1.1, 'HD1': 1.1, 'HD2': 1.1, 'HE1': 1.1, 'HE2': 1.1, 'HH': 1.0}, 
 	'V': {'N': 1.3, 'CA': 1.5, 'C': 1.3, 'O': 1.4, 'CB': 1.5, 'CG1': 1.5, 'CG2': 1.5, 'H': 1.0, 'HA': 1.1, 'HB': 1.1, 'HG11': 1.1, 'HG12': 1.1, 'HG13': 1.1, 'HG21': 1.1, 'HG22': 1.1, 'HG23': 1.1}, 
 	'Z': {'N': 1.3, 'CA': 1.5, 'C': 1.3, 'O': 1.4, 'CB': 1.5, 'CG': 1.5, 'AD1': 1.5, 'AD2': 1.5}, 
-	'X': {'N': 1.3, 'CA': 1.5, 'C': 1.3, 'O': 1.4, 'CB': 1.5, 'CG': 1.5, 'CD': 1.5, 'AE1': 1.5, 'AE2': 1.5}
+	'X': {'N': 1.3, 'CA': 1.5, 'C': 1.3, 'O': 1.4, 'CB': 1.5, 'CG': 1.5, 'CD': 1.5, 'AE1': 1.5, 'AE2': 1.5},
+    'J': {'C': 1.3, 'O': 1.4, 'CH3': 1.5}
 }
+
 
 aa_three_to_one = {
     'ALA': 'A',  # Alanine
@@ -83,7 +85,7 @@ aa_three_to_one = {
     'ACE': 'J',  # Just in case
 }
 
-def get_protein_information(pdb_name, pdb_dir):
+def get_protein_information(pdb_name, pdb_dir, nchains = 2):
     '''
     Gets all the information for a protein and
     stores it in a pandas dataframe. This includes
@@ -165,6 +167,8 @@ def get_protein_information(pdb_name, pdb_dir):
                     
                     if curr_atom_name == "OXT":
                         atom_radius.append(1.4)
+                    elif curr_atom_name == "SE":
+                        atom_radius.append(1.9)
                     else:
                         ## Save the atomic radius for the heavy atoms
                         atom_radius.append(atomic_radius_dict[curr_amino_acid][curr_atom_name])
@@ -186,6 +190,9 @@ def get_protein_information(pdb_name, pdb_dir):
         
         ## Increment the chain ID
         chain_count += 1
+        
+        if chain_count == nchains+1:
+            break
         
         
     ## Create dataframe from information

@@ -104,7 +104,7 @@ atomic_radius_dict = {
     "SG" : 1.75
 }
 
-def get_protein_information(pdb_name, pdb_dir):
+def get_protein_information(pdb_name, pdb_dir, nchains = 2):
     '''
     Gets all the information for a protein and
     stores it in a pandas dataframe. This includes
@@ -154,7 +154,8 @@ def get_protein_information(pdb_name, pdb_dir):
                 chain_id.append(chain_count)
         
                 ## Save the amino acid name
-                amino_acid_name.append(aa_three_to_one[residue.get_resname()])
+                curr_amino_acid = aa_three_to_one[residue.get_resname()]
+                amino_acid_name.append(curr_amino_acid)
 
                 ## Save the amino acid ID
                 amino_acid_id.append(residue_count)
@@ -170,12 +171,12 @@ def get_protein_information(pdb_name, pdb_dir):
                 atomic_z.append(temp_coords[2])
                 
                 ## Specify C-alpha
-                if "CA" in curr_atom_name:
+                if "CA" == curr_atom_name:
                     ca_bool.append(1)
                     ha_bool.append(1)
                     hyd_bool.append(0)
                     
-                    atom_radius.append(1.5) ## c-alpha radius
+                    atom_radius.append(atomic_radius_dict[curr_amino_acid][curr_atom_name])
                     
                 ## Specify Heavy Atom
                 elif "H" not in curr_atom_name[0] and curr_atom_name[0] not in ["1", "2", "3", "4"]:
@@ -183,12 +184,13 @@ def get_protein_information(pdb_name, pdb_dir):
                     ha_bool.append(1)
                     hyd_bool.append(0)
                     
-                    ## Save the atomic radius for the heavy atoms
-                    if curr_atom_name in atomic_radius_dict:
-                        atom_radius.append(atomic_radius_dict[curr_atom_name])
-                        
+                    if curr_atom_name == "OXT":
+                        atom_radius.append(1.4)
+                    elif curr_atom_name == "SE":
+                        atom_radius.append(1.9)
                     else:
-                        atom_radius.append(6969)
+                        ## Save the atomic radius for the heavy atoms
+                        atom_radius.append(atomic_radius_dict[curr_amino_acid][curr_atom_name])
                     
                 ## Specify Hydrogen
                 else:
@@ -196,17 +198,20 @@ def get_protein_information(pdb_name, pdb_dir):
                     ha_bool.append(0)
                     hyd_bool.append(1)
                     
-                    if curr_atom_name == "H":
-                        atom_radius.append(1.0) ## normal hydrogen
+                    if curr_atom_name in atomic_radius_dict[curr_amino_acid]:
+                        atom_radius.append(atomic_radius_dict[curr_amino_acid][curr_atom_name])
                         
                     else:
-                        atom_radius.append(1.1) ## slightly larger hydrogen
+                        atom_radius.append(1.1) ## slightly larger hydrogen as a failsafe
                         
             residue_count += 1
                             
         
         ## Increment the chain ID
         chain_count += 1
+        
+        if chain_count == nchains+1:
+            break
         
         
     ## Create dataframe from information
@@ -913,6 +918,112 @@ def calculate_rsasa_for_protein(protein_df, nslices = 100, probe_radius = 1.4, s
 
 	return rsasa_df
 
+
+####################
+### Voronoi Code ###
+####################
+
+def get_voronoi_tesselation(protein_df, box_margin = 3, dispersion = 4.5):
+    '''
+    Gets the voronoi tesselation of the coordinates
+    that are specified in the protein_df. It will 
+    return the voronoi tesselation and the 
+    neighbors for each cell. Box_margin is the extra
+    margin that is added to the box volume
+    when do the cell calcs. The dispersion is the minimum
+    distance between two atoms that would be considered a 'contact'. 
+    which is set at 4.5 Ang by default.
+    '''
+    
+    ## Get the protein coordinates
+    
+    all_coords = np.zeros((len(protein_df), 3))
+    
+    all_coords[:, 0] = protein_df["x_coord"]
+    all_coords[:, 1] = protein_df["y_coord"]
+    all_coords[:, 2] = protein_df["z_coord"]
+    
+    ## Shift the coordinates to be centered at the origin
+    
+    all_coords -= np.mean(all_coords, axis = 0)
+    
+    ## Get atomic radii list
+    
+    atomic_radii = np.array(protein_df["atom_radius"])
+    
+    ## Minimum box size that works
+    
+    lim_x = [np.min(all_coords[:, 0]) - box_margin, np.max(all_coords[:, 0]) + box_margin]
+    lim_y = [np.min(all_coords[:, 1]) - box_margin, np.max(all_coords[:, 1]) + box_margin]
+    lim_z = [np.min(all_coords[:, 2]) - box_margin, np.max(all_coords[:, 2]) + box_margin]
+    
+    box_lims = [lim_x, lim_y, lim_z]
+
+    ## Compute the tesselation
+
+    voronoi_tessellation = pyvoro.compute_voronoi(all_coords, box_lims, dispersion, atomic_radii)
+    
+    return voronoi_tessellation
+
+
+def get_voronoi_neighbors_aa(protein_df, voronoi_tessellation):
+    '''
+    Gets the voronoi neighbors of all amino acids in the protein
+    using the voronoi neighbors as the metric by which neighbors are
+    determined. Output is an adjacency matrix of the voronoi
+    neighbors, as well as counts of total voronoi neighbors
+    and counts of total interface voronoi neighbors (if it applies).
+    '''
+    
+    ## Get total protein aa count
+    
+    total_prot_len = np.max(protein_df["aa_id"])+1
+    
+    ## Init neighbor adjacency matrix
+    
+    neighbor_adj_mat = np.zeros((total_prot_len, total_prot_len))
+    
+    ## Loop through the amino acids and add to the adjacency matrix
+    
+    for i in range(total_prot_len):
+        
+        ## temp df for each AA
+        
+        aa_df = protein_df[protein_df["aa_id"] == i]
+        
+        atom_ids = aa_df.index
+                
+        ## Loop through all the atoms in the amino acid
+        
+        aa_neighbor_set = set([])
+        
+        for j in atom_ids:
+            
+            voro_cell = voronoi_tessellation[j]
+            
+            neighs = set([f["adjacent_cell"] for f in voro_cell["faces"]])
+            
+            aa_neighbor_set |= neighs
+            
+        ## Correct the set and remove neighbors of cells from the aa
+        
+        other_aa_neighs = aa_neighbor_set - set(atom_ids)
+                
+        ## Link the atom neighbors to specific amino acids and add to the adj mat
+        
+        for j in other_aa_neighs:
+            
+            if j < 0:
+                continue
+                ## odd thing with getting negative values cell IDs? 
+            
+            neigh_aa = protein_df.iloc[j]["aa_id"]
+                        
+            ## Update adj mat
+            neighbor_adj_mat[i, neigh_aa] = 1
+            
+    
+    return neighbor_adj_mat
 
 ###################
 ### File Saving ###
