@@ -57,53 +57,6 @@ aa_three_to_one = {
 	'VAL': 'V',  # Valine
 }
 
-atomic_radius_dict = {
-    "N" : 1.3,
-    "CA" : 1.5,
-    "C" : 1.5, 
-    "CB" : 1.5,
-    "CG" : 1.5,
-    "CD" : 1.5,
-    "O" : 1.4,
-    "CO" : 1.3,
-    "S" : 1.75,
-    "Se" : 1.9,
-    "H" : 1.0,
-    "H1" : 1.1,
-    "H2" : 1.1,
-    "H3" : 1.1,
-    "CD1" : 1.5,
-    "CD2" : 1.5,
-    "CE" : 1.5,
-    "CE1" : 1.5,
-    "CE2" : 1.5,
-    "CE3" : 1.5,
-    "CG1" : 1.5,
-    "CG2" : 1.5,
-    "CH2" : 1.5,
-    "CZ" : 1.5,
-    "CZ2" : 1.5,
-    "CZ3" : 1.5,
-    "ND1" : 1.3,
-    "ND2" : 1.3,
-    "NE" : 1.3,
-    "NE1" : 1.3,
-    "NE2" : 1.3,
-    "NH1" : 1.3,
-    "NH2" : 1.3,
-    "NZ" : 1.3,
-    "OD1" : 1.4,
-    "OD2" : 1.4,
-    "OE1" : 1.4,
-    "OE2" : 1.4,
-    "OG" : 1.4,
-    "OG1" : 1.4,
-    "OH" : 1.4,
-    "OXT" : 1.4,
-    "SD" : 1.75,
-    "SG" : 1.75
-}
-
 def get_protein_information(pdb_name, pdb_dir, nchains = 2):
     '''
     Gets all the information for a protein and
