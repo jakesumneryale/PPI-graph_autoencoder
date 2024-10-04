@@ -26,7 +26,7 @@ parser.add_argument("--input_file", "-f", help="The name of the input file (if o
 parser.add_argument("--output_dir", "-od", default = ".", help="The directory where the output file will be saved")
 parser.add_argument("--file_indicator", "-fi", default = ".pdb", help="The fragment of the file that is used by glob to identify the files in the directory (if running on multiple files). (Default is '.pdb')")
 parser.add_argument("--probe_radius", "-pr", default = 1.4, type = float, help="The radius of the probe used by the Lee-Richards algorithm to calculate SASA (uses 1.4 Ang by default)")
-parser.add_argument("--nslices", "-ns", default = 100, type = int, help="The number of slices used to determine the surface area for the Lee-Richards algorithm (uses 100 slices by default)")
+parser.add_argument("--nslices", "-ns", default = 1000, type = int, help="The number of slices used to determine the surface area for the Lee-Richards algorithm (uses 1000 slices by default)")
 parser.add_argument("--all_dir", "-a", default = False, type = bool, help="Whether the code is running on an entire directory or just one file (False by default). If true, then file_indicator is used to identify files in the directory to run the code on")
 parser.add_argument("--output_csv", "-oc", default = True, type = bool, help="Whether to output the rSASA data as a CSV file (True) or XLSX file (False)")
 

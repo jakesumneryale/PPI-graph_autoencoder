@@ -812,7 +812,7 @@ def generate_node_features(adj_mat, aa_list, chain1_len, chain2_len):
 	return feature_arr
 
 
-def calculate_rsasa_for_protein(protein_df, nslices = 100, probe_radius = 1.4, save_file = False, save_dir = "./", pdb_file = ""):
+def calculate_rsasa_for_protein(protein_df, nslices = 1000, probe_radius = 1.4, save_file = False, save_dir = "./", pdb_file = ""):
 	'''
 	Calculate the rSASA for each amino acid
 	in the protein. Returns the dataframe of the 
