@@ -183,7 +183,7 @@ def get_protein_information(pdb_name, pdb_dir, nchains = 2):
                         atom_radius.append(atomic_radius_dict[curr_amino_acid][curr_atom_name])
                         
                     else:
-                        atom_radius.append(1.1) ## slightly larger hydrogen as a failsafe
+                        atom_radius.append(1.0) ## slightly larger hydrogen as a failsafe
                         
             residue_count += 1
                             
