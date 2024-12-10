@@ -249,7 +249,7 @@ def calculate_sasa_protein(protein_df, new_params):
     for i in range(sasa_result.nAtoms()):
         sasa_atomic[i] = sasa_result.atomArea(i)
 
-    protein_df["atom_sasa"] = sasa_atomic
+    protein_df.loc[:, "atom_sasa"] = sasa_atomic
 
     print(sasa_result.totalArea())
 
@@ -262,10 +262,14 @@ def calculate_residue_sasa_protein(protein_df):
     for each residue in the protein_df
     '''
 
-    residue_sasa = np.zeros((np.max(protein_df["aa_id"]+1),))
+    delta_size = np.max(protein_df["aa_id"]+1) - np.min(protein_df["aa_id"])
+    residue_sasa = np.zeros((delta_size,))
+
+    res_min = np.min(protein_df["aa_id"])
 
     for i in range(len(residue_sasa)):
-        temp_df = protein_df[protein_df["aa_id"] == i]
+        ind = res_min + i
+        temp_df = protein_df[protein_df["aa_id"] == ind]
         res_sum = np.sum(temp_df["atom_sasa"])
         residue_sasa[i] = res_sum
 
@@ -284,13 +288,17 @@ def calculate_residue_sasa_solvent(protein_df, new_params):
     of both.
     '''
 
-    residue_sasa = np.zeros((np.max(protein_df["aa_id"]+1),))
+    delta_size = np.max(protein_df["aa_id"]+1) - np.min(protein_df["aa_id"])
+    residue_sasa = np.zeros((delta_size,))
+    res_min = np.min(protein_df["aa_id"])
     
     after_list = ["N", "CA", "H"]
     before_list = ["C", "O", "CA"]
 
     for i in range(len(residue_sasa)):
-        temp_df = protein_df[protein_df["aa_id"] == i]
+
+        ind = res_min + i
+        temp_df = protein_df[protein_df["aa_id"] == ind]
 
         ## Get temp residue coords
 
@@ -315,7 +323,7 @@ def calculate_residue_sasa_solvent(protein_df, new_params):
 
         if i == 0:
             ## First residue, no C from before
-            after_res = protein_df[protein_df["aa_id"] == i+1]
+            after_res = protein_df[protein_df["aa_id"] == ind+1]
             try:
                 for k in range(3):
                     after_res_atom = after_res[after_res["atom_name"] == after_list[k]].iloc[0]
@@ -330,7 +338,7 @@ def calculate_residue_sasa_solvent(protein_df, new_params):
 
         elif i == len(residue_sasa)-1:
             ## Last residue, no N from next
-            before_res = protein_df[protein_df["aa_id"] == i-1]
+            before_res = protein_df[protein_df["aa_id"] == ind-1]
 
             try:
                 for k in range(3):
@@ -345,8 +353,8 @@ def calculate_residue_sasa_solvent(protein_df, new_params):
 
         else:
             ## Normal residue, add both C before and N after
-            before_res = protein_df[protein_df["aa_id"] == i-1]
-            after_res = protein_df[protein_df["aa_id"] == i+1]
+            before_res = protein_df[protein_df["aa_id"] == ind-1]
+            after_res = protein_df[protein_df["aa_id"] == ind+1]
             
             ## Before
             try:

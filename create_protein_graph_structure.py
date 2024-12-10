@@ -293,8 +293,9 @@ def get_aa_list(protein_df):
     
     
     num_max = np.max(protein_df["aa_id"])+1
+    num_min = np.min(protein_df["aa_id"])
     
-    for i in range(num_max):
+    for i in range(num_min,num_max):
         
         aa_list.append(protein_df[protein_df["aa_id"] == i]["aa_name"].iloc[0])
         
