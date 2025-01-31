@@ -14,6 +14,7 @@ import argparse
 from glob import glob 
 import h5py
 import freesasa
+import pyvoro
 
 ## Local imports from the rest of the code scripts
 
