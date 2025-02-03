@@ -34,6 +34,8 @@ parser.add_argument("--file_indicator", "-fi", default = ".pdb", help="The fragm
 ####### GRAPH GENERATION FUNCTIONS #######
 ##########################################
 
+## This is a comment
+
 
 aa_three_to_one = {
 	'ALA': 'A',  # Alanine
