@@ -15,7 +15,7 @@ from glob import glob
 import h5py
 import pyvista as pv
 import pyvoro
-import create_protein_graph_structure_jake as jk
+import create_protein_graph_structure as jk
 import trimesh as tm
 
 
