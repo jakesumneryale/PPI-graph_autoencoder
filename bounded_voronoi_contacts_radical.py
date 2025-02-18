@@ -19,12 +19,14 @@ import create_protein_graph_structure as jk
 import trimesh as tm
 
 
-# parser = argparse.ArgumentParser()
-# parser.add_argument('-d','--dir',help='Directory to file')
-# parser.add_argument('-f','--fh',help='File name of pdb')
-# parser.add_argument('-o','--out',help='Output file name ending in .csv')
-# parser.add_argument('-p','--probe',default=1.4,help='Probe size to define boundary')
-# args=parser.parse_args()
+parser = argparse.ArgumentParser()
+parser.add_argument('-d','--dir',help='Directory to file')
+parser.add_argument('-f','--fh',help='File name of pdb')
+parser.add_argument('-p','--probe',default=1.4,help='Probe size to define boundary')
+parser.add_argument('-o','--out',required=False,help='Output file name indicator, must be included if save=True')
+parser.add_argument('-od','--out_dir',required=False,help='Output file directory, must be included if save=True')
+parser.add_argument('-s','--save', default=False,help='Save outputs to .csv files')
+args=parser.parse_args()
 
 aa_one_to_three={v: k for k, v in jk.aa_three_to_one.items()}
 
@@ -287,41 +289,39 @@ def add_packing_info(protein_df,neighbor_adj_mat_atom,neighbor_adj_mat_aa,vorono
 
 
 def main():
-    target_dir=Path('/gpfs/gibbs/pi/ohern/nb685/Decoys/Supersampled_structures/targets')
-    rSASA_dir=Path('/gpfs/gibbs/pi/ohern/nb685/Decoys/Supersampled_structures/targets/rSASA/rSASA_complex')
-    all_targs=sorted([f for f in listdir(target_dir) if isfile(join(target_dir, f)) and '.pdb' in f])
-    for ind,targ in enumerate(all_targs):
+
+    pdb_name=args.fh
+    pdb_dir=Path(args.dir)
+    probe_size=args.probe
+    out_indicator=args.out
+    out_dir=Path(args.out_dir)
+    save=args.save
         
-        pdb_id=targ[:4]
-        pdb_fh=targ
-        rSASA_path=rSASA_dir / Path(f'{pdb_id}_complex_H_sasa_data.csv')
-        probe_size=1.4
+    protein_df=jk.get_protein_information(pdb_name,pdb_dir)
+    
+    bounded_voro_tessellation=get_bounded_voro(protein_df,box_margin=1,dispersion=4.5,probe_size=probe_size)
+    all_contacts=get_all_contacts_aa(protein_df=protein_df,voronoi_tessellation=bounded_voro_tessellation)
+    interface_contacts=get_interface_contacts_aa(protein_df=protein_df,voronoi_tessellation=bounded_voro_tessellation)
 
-        print(f'{pdb_id}:{ind} Started',flush=True)
-        
-        protein_df=jk.get_protein_information(pdb_fh,target_dir)
-        
-        bounded_voro_tessellation=get_bounded_voro(protein_df,box_margin=1,dispersion=4.5,probe_size=probe_size)
-        all_contacts=get_all_contacts_aa(protein_df=protein_df,voronoi_tessellation=bounded_voro_tessellation)
-        interface_contacts=get_interface_contacts_aa(protein_df=protein_df,voronoi_tessellation=bounded_voro_tessellation)
+    neighbor_adj_mat_aa=jk.get_voronoi_neighbors_aa(protein_df, bounded_voro_tessellation)
+    neighbor_adj_mat_atom=get_voronoi_neighbors_atom(protein_df, bounded_voro_tessellation)
 
-        neighbor_adj_mat_aa=jk.get_voronoi_neighbors_aa(protein_df, bounded_voro_tessellation)
-        neighbor_adj_mat_atom=get_voronoi_neighbors_atom(protein_df, bounded_voro_tessellation)
+    protein_df=add_packing_info(protein_df,neighbor_adj_mat_atom,neighbor_adj_mat_aa,bounded_voro_tessellation,rSASA_path)
 
-        protein_df=add_packing_info(protein_df,neighbor_adj_mat_atom,neighbor_adj_mat_aa,bounded_voro_tessellation,rSASA_path)
+    if save:
 
-        all_contacts_out_fh=f'{pdb_id}_all_contacts.csv'
-        interface_contacts_out_fh=f'{pdb_id}_interface_contacts.csv'
-        protein_out_fh=f'{pdb_id}_protein_data.csv'
+        all_contacts_out_fh=f'{pdb_name}_all_contacts.csv'
+        interface_contacts_out_fh=f'{pdb_name}_interface_contacts.csv'
+        protein_out_fh=f'{pdb_name}_protein_data.csv'
 
-        out_dir=Path('/gpfs/gibbs/pi/ohern/nb685/Decoys/Supersampled_structures/contact_data/voro_contact_data/radical')
+        save_dir=out_dir
         out_dir.mkdir(exist_ok=True)
 
-        all_contacts.to_csv(out_dir / Path(all_contacts_out_fh))
-        interface_contacts.to_csv(out_dir / Path(interface_contacts_out_fh))
-        protein_df.to_csv(out_dir / Path(protein_out_fh))
+        all_contacts.to_csv(save_dir / Path(all_contacts_out_fh))
+        interface_contacts.to_csv(save_dir / Path(interface_contacts_out_fh))
+        protein_df.to_csv(save_dir / Path(protein_out_fh))
 
-        print(f'{pdb_id} finished',flush=True)
+
 
 
 
