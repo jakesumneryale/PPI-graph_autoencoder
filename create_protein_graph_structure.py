@@ -34,8 +34,6 @@ parser.add_argument("--file_indicator", "-fi", default = ".pdb", help="The fragm
 ####### GRAPH GENERATION FUNCTIONS #######
 ##########################################
 
-## This is a comment
-
 
 aa_three_to_one = {
 	'ALA': 'A',  # Alanine
@@ -86,6 +84,8 @@ def get_protein_information(pdb_name, pdb_dir, nchains = 2):
     
     amino_acid_id = []
     amino_acid_name = []
+    amino_acid_ind=[]
+    chain_name=[]
     chain_id = []
     atom_name = []
     atom_radius = []
@@ -108,6 +108,8 @@ def get_protein_information(pdb_name, pdb_dir, nchains = 2):
                 
                 ## Save the chain ID
                 chain_id.append(chain_count)
+                chain_name.append(chain.get_id())
+
         
                 ## Save the amino acid name
                 curr_amino_acid = aa_three_to_one[residue.get_resname()]
@@ -115,6 +117,8 @@ def get_protein_information(pdb_name, pdb_dir, nchains = 2):
 
                 ## Save the amino acid ID
                 amino_acid_id.append(residue_count)
+                amino_acid_ind.append(residue.get_id()[1])
+
                 
                 ## Save the atom name
                 curr_atom_name = atom.get_name()
@@ -174,7 +178,9 @@ def get_protein_information(pdb_name, pdb_dir, nchains = 2):
     
     protein_dict = {
         "chain_id" : chain_id,
+        "chain_name": chain_name,
         "aa_id" : amino_acid_id,
+        "aa_ind" : amino_acid_ind,
         "aa_name" : amino_acid_name,
         "atom_name" : atom_name,
         "atom_radius" : atom_radius,
@@ -293,6 +299,8 @@ def get_aa_list(protein_df):
     '''
     
     aa_list = []
+    aa_ind_list=[]
+    chain_id_list=[]
     
     
     num_max = np.max(protein_df["aa_id"])+1
@@ -301,8 +309,12 @@ def get_aa_list(protein_df):
     for i in range(num_min,num_max):
         
         aa_list.append(protein_df[protein_df["aa_id"] == i]["aa_name"].iloc[0])
-        
-    return aa_list
+        aa_ind_list.append(protein_df[protein_df["aa_id"] == i]["aa_ind"].iloc[0])
+        chain_id_list.append(protein_df[protein_df["aa_id"] == i]["chain_name"].iloc[0])
+
+
+    return aa_list, aa_ind_list,chain_id_list
+
 
 def get_protein_coords(pdb_name, pdb_dir):
 	'''
@@ -857,13 +869,16 @@ def calculate_rsasa_for_protein(protein_df, nslices = 1000, probe_radius = 1.4, 
 
 	rsasa_df = pd.DataFrame()
 
-	rsasa_df["residue_name"] = get_aa_list(protein_df)
+	rsasa_df["residue_name"],rsasa_df["residue_ind"],rsasa_df["chain_id"] = get_aa_list(protein_df)
 
 	rsasa_df["SASA_protein"] = res_sasa 
 
 	rsasa_df["SASA_dipep"] = sol_sasa
 
 	rsasa_df["rSASA"] = rsasa_vals
+	          
+	rsasa_df=rsasa_df.set_index('residue_ind')
+
 
 	if save_file:
 
