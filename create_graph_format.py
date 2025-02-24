@@ -1,5 +1,4 @@
 ##create_graph_format.py
-##Naomi Brandt
 ##Created: 2/03/25
 
 from pathlib import Path
@@ -44,11 +43,15 @@ def initialize_graphs(pdb_id,pdb_dir,save_dir = "./", file_indicator = "_H_0001.
         try:
             decoy_group = fh.create_group(decoy_name)
 
+            ## Calculating basic information about PPI 
+
             protein_df=jk.get_protein_information(decoy,pdb_dir)
             bounded_voro_tessellation=voro.get_bounded_voro(protein_df,box_margin=1,dispersion=4.5,probe_size=probe_size)
             all_contacts=voro.get_all_contacts_aa(protein_df=protein_df,voronoi_tessellation=bounded_voro_tessellation)
             neighbor_adj_mat_aa=jk.get_voronoi_neighbors_aa(protein_df, bounded_voro_tessellation)
 
+
+            ## Initializing node and edge features
             node_df=initialize_node_feats(decoy_group,protein_df,neighbor_adj_mat_aa)
             initialize_edge_feats(decoy_group,node_df,all_contacts)
 
@@ -59,6 +62,12 @@ def initialize_graphs(pdb_id,pdb_dir,save_dir = "./", file_indicator = "_H_0001.
 
 
 def initialize_node_feats(decoy_group,protein_df,adj_mat):
+    '''
+    Creates node feature groups and datasets within a given .hdf5 group
+    Adds reference for basic node information (amino acid index, chain onehot encoding, amino acid type)
+    Adds datasets of onehot encoding for amino acid type, chain id, interface participation
+    '''
+
     node_feature_group=decoy_group.create_group('node_features')
 
     node_df=protein_df[['aa_id','chain_id','aa_name']].drop_duplicates().reset_index(drop=True)
@@ -85,6 +94,12 @@ def initialize_node_feats(decoy_group,protein_df,adj_mat):
     return node_df
 
 def initialize_edge_feats(decoy_group,node_df,all_contacts):
+    '''
+    Creates edge feature groups and datasets within a given .hdf5 group
+    Adds reference for basic contact information (list of amino acids interacting with their specific identifiers)
+    Adds dataset for indices of amino acid interactions, onehot encoding for interface edges
+    '''
+
     edge_feature_group=decoy_group.create_group('edge_features')
 
     all_contacts['chain_id1']=all_contacts['chain1'].values-1
@@ -106,4 +121,6 @@ def initialize_edge_feats(decoy_group,node_df,all_contacts):
     decoy_group.create_dataset('edge_reference',data=contact_list,dtype=sdt)
     edge_feature_group.create_dataset('contacts',data=contact_ids)
     edge_feature_group.create_dataset('interface_edges',data=contact_interface_onehot)
+
+
 

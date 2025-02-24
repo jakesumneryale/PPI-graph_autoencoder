@@ -1,5 +1,4 @@
 ##bounded_voronoi_contacts_radical.py
-## Naomi Brandt
 ## Created 1/3/25
 ## Edited 1/21/25 - Added radical tessellation
 
