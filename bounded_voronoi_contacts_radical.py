@@ -1,4 +1,4 @@
-##Bounded_Voronoi_Contacts.py
+##bounded_voronoi_contacts_radical.py
 ## Naomi Brandt
 ## Created 1/3/25
 ## Edited 1/21/25 - Added radical tessellation
@@ -143,29 +143,51 @@ def get_bounded_voro(protein_df, box_margin = 1, dispersion = 4.5,probe_size = 1
     return clean_bounded_voro
 
 def get_all_contacts_aa(protein_df,voronoi_tessellation):
+    '''
+    Calculates the voronoi neighbors at the amino acid level using jk.get_voronoi_neighbors_aa
+    Generates dataframe of all unique unique interactions (inter and intrachain)
+    
+    Input
+    protein_df: protein dataframe in format from jk.get_protein_information()
+    voronoi_tessellation: voronoi tessellation (from either get_bounded_voro or pyvoro.compute_voronoi())
+
+    Output
+    all_contacts: dataframe in which each row represents a contact, with information including
+    index of each participating amino acid, residue type in 3-letter code, and chain id
+    '''
     
     protein_neighbor_mat=jk.get_voronoi_neighbors_aa(protein_df, voronoi_tessellation)
 
     all_contacts=np.argwhere(protein_neighbor_mat==1)
-    all_contacts_df=pd.DataFrame(columns=['index1','restype1','chain1','index2','restype2','chain2',])
+    all_contacts_df=pd.DataFrame(columns=['aa_id1','index1','restype1','chain1','aa_id2','index2','restype2','chain2'])
+
+    
+    contact_set_list=[]
 
     for ind,contact in enumerate(all_contacts):
             
         aai=contact[0]
         aaj=contact[1]
-        chaini=protein_df[protein_df['aa_id']==aai]['chain_name'].iloc[0]
-        chainj=protein_df[protein_df['aa_id']==aaj]['chain_name'].iloc[0]
+
+        contact_set={aai,aaj}
+
+        if contact_set not in contact_set_list:
+
+            contact_set_list.append(contact_set)
+
+            chaini=protein_df[protein_df['aa_id']==aai]['chain_id'].iloc[0]
+            chainj=protein_df[protein_df['aa_id']==aaj]['chain_id'].iloc[0]
 
 
-        rec_ind=protein_df[protein_df['aa_id']==aai]['aa_ind'].iloc[0]
-        rec_type=aa_one_to_three[protein_df[protein_df['aa_id']==aai]['aa_name'].iloc[0]]
-        lig_ind=protein_df[protein_df['aa_id']==aaj]['aa_ind'].iloc[0]
-        lig_type=aa_one_to_three[protein_df[protein_df['aa_id']==aaj]['aa_name'].iloc[0]]
+            rec_ind=protein_df[protein_df['aa_id']==aai]['aa_ind'].iloc[0]
+            rec_type=aa_one_to_three[protein_df[protein_df['aa_id']==aai]['aa_name'].iloc[0]]
+            lig_ind=protein_df[protein_df['aa_id']==aaj]['aa_ind'].iloc[0]
+            lig_type=aa_one_to_three[protein_df[protein_df['aa_id']==aaj]['aa_name'].iloc[0]]
 
-        contact_data=[rec_ind,rec_type,chaini,lig_ind,lig_type,chainj]
-        contact_df=pd.DataFrame(contact_data).T
-        contact_df.columns=all_contacts_df.columns
-        all_contacts_df=pd.concat([all_contacts_df,contact_df])
+            contact_data=[aai,rec_ind,rec_type,chaini,aaj,lig_ind,lig_type,chainj]
+            contact_df=pd.DataFrame(contact_data).T
+            contact_df.columns=all_contacts_df.columns
+            all_contacts_df=pd.concat([all_contacts_df,contact_df])
 
     all_contacts_df.reset_index(inplace=True,drop=True)
     return all_contacts_df
@@ -198,11 +220,11 @@ def get_interface_contacts_aa(protein_df,voronoi_tessellation):
         aai=contact[0]
         aaj=contact[1]
 
-        chaini=protein_df[protein_df['aa_id']==aai]['chain_name'].iloc[0]
-        chainj=protein_df[protein_df['aa_id']==aaj]['chain_name'].iloc[0]
+        chaini=protein_df[protein_df['aa_id']==aai]['chain_id'].iloc[0]
+        chainj=protein_df[protein_df['aa_id']==aaj]['chain_id'].iloc[0]
 
         if ind==0:
-            chain1=protein_df[protein_df['aa_id']==aai]['chain_name'].iloc[0]
+            chain1=protein_df[protein_df['aa_id']==aai]['chain_id'].iloc[0]
 
         ## Stops once it gets to the second chain (note that this only works for 2 chain interfaces)
         if chaini != chain1:
