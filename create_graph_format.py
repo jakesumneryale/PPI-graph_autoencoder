@@ -33,7 +33,7 @@ def initialize_graphs(pdb_id,pdb_dir,save_dir = "./", file_indicator = "_H_0001.
 
 
     graph_fh=Path(save_dir) / Path(f'{pdb_id}.hdf5')
-    fh=h5py.File(str(graph_fh),'w')
+    fh=h5py.File(str(graph_fh),'x')
 
     all_decoys = sorted([f for f in listdir(pdb_dir) if isfile(join(pdb_dir, f)) and file_indicator in f])
 
@@ -123,4 +123,27 @@ def initialize_edge_feats(decoy_group,node_df,all_contacts):
     edge_feature_group.create_dataset('interface_edges',data=contact_interface_onehot)
 
 
+def add_feature(hdf5_dir, hdf5_file, decoy_name, feature_type, feature_name, dataset):
+
+    '''
+    Method to add a feature to a graph given the file details and decoy for which the feature has been calculated
+    '''
+
+    graph_fh=Path(hdf5_dir) / Path(hdf5_file)
+    fh=h5py.File(graph_fh,'r+')
+
+    decoy_group= fh[decoy_name]
+
+    if feature_type=='node':
+        node_feature_group=decoy_group['node_features']
+        node_feature_group.create_dataset(feature_name,data=dataset)
+
+    elif feature_type=='edge':
+        edge_feature_group=decoy_group['edge_features']
+        edge_feature_group.create_dataset(feature_name,data=dataset)
+
+    else:
+        print('Feature type of either node or edge must be specified')
+
+    
 
