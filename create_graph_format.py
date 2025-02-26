@@ -12,6 +12,14 @@ from os.path import isfile, join
 import create_protein_graph_structure as jk
 import bounded_voronoi_contacts_radical as voro
 
+parser = argparse.ArgumentParser()
+parser.add_argument('-d','--dir',help='Directory to file')
+parser.add_argument('-p','--pdbid',help='pdb name')
+parser.add_argument('-o','--out_dir')
+parser.add_argument('-ps','--probe',default=1.4,help='Probe size to define boundary')
+parser.add_argument('-i','--file_indicator',default='_H_0001.pdb',help='Identifier for pdb file')
+args=parser.parse_args()
+
 
 sdt = h5py.string_dtype(encoding='utf-8')
 
@@ -33,31 +41,32 @@ def initialize_graphs(pdb_id,pdb_dir,save_dir = "./", file_indicator = "_H_0001.
 
 
     graph_fh=Path(save_dir) / Path(f'{pdb_id}.hdf5')
-    fh=h5py.File(str(graph_fh),'x')
+    graph_file=h5py.File(str(graph_fh),'x')
 
     all_decoys = sorted([f for f in listdir(pdb_dir) if isfile(join(pdb_dir, f)) and file_indicator in f])
 
-    for decoy in all_decoys:
-        decoy_name = decoy.split(file_indicator)[0]
+    with graph_file as fh:
+        for decoy in all_decoys:
+            decoy_name = decoy.split(file_indicator)[0]
 
-        try:
-            decoy_group = fh.create_group(decoy_name)
+            try:
+                decoy_group = fh.create_group(decoy_name)
 
-            ## Calculating basic information about PPI 
+                ## Calculating basic information about PPI 
 
-            protein_df=jk.get_protein_information(decoy,pdb_dir)
-            bounded_voro_tessellation=voro.get_bounded_voro(protein_df,box_margin=1,dispersion=4.5,probe_size=probe_size)
-            all_contacts=voro.get_all_contacts_aa(protein_df=protein_df,voronoi_tessellation=bounded_voro_tessellation)
-            neighbor_adj_mat_aa=jk.get_voronoi_neighbors_aa(protein_df, bounded_voro_tessellation)
+                protein_df=jk.get_protein_information(decoy,pdb_dir)
+                bounded_voro_tessellation=voro.get_bounded_voro(protein_df,box_margin=1,dispersion=4.5,probe_size=probe_size)
+                all_contacts=voro.get_all_contacts_aa(protein_df=protein_df,voronoi_tessellation=bounded_voro_tessellation)
+                neighbor_adj_mat_aa=jk.get_voronoi_neighbors_aa(protein_df, bounded_voro_tessellation)
 
 
-            ## Initializing node and edge features
-            node_df=initialize_node_feats(decoy_group,protein_df,neighbor_adj_mat_aa)
-            initialize_edge_feats(decoy_group,node_df,all_contacts)
+                ## Initializing node and edge features
+                node_df=initialize_node_feats(decoy_group,protein_df,neighbor_adj_mat_aa)
+                initialize_edge_feats(decoy_group,node_df,all_contacts)
 
-        except:
-            decoy_group=fh[decoy_name]
-            print(f"{decoy_name} already initialized")
+            except:
+                decoy_group=fh[decoy_name]
+                print(f"{decoy_name} already initialized")
 
 
 
@@ -89,7 +98,7 @@ def initialize_node_feats(decoy_group,protein_df,adj_mat):
     decoy_group.create_dataset('node_reference',data=node_list,dtype=sdt)
     node_feature_group.create_dataset('aa_type',data=aa_onehot)
     node_feature_group.create_dataset('chain',data=node_df['chain_id'].values.reshape((len(node_df),1))-1)
-    node_feature_group.create_dataset('interface_nodes',node_interface_onehot)
+    node_feature_group.create_dataset('interface_nodes',data=node_interface_onehot)
 
     return node_df
 
@@ -99,6 +108,7 @@ def initialize_edge_feats(decoy_group,node_df,all_contacts):
     Adds reference for basic contact information (list of amino acids interacting with their specific identifiers)
     Adds dataset for indices of amino acid interactions, onehot encoding for interface edges
     '''
+
 
     edge_feature_group=decoy_group.create_group('edge_features')
 
@@ -147,3 +157,18 @@ def add_feature(hdf5_dir, hdf5_file, decoy_name, feature_type, feature_name, dat
 
     
 
+def main():
+
+    pdb_id=args.pdbid
+    pdb_dir=Path(args.dir)
+    probe_size=args.probe
+    out_dir=Path(args.out_dir)
+    indicator=args.file_indicator
+
+
+    initialize_graphs(pdb_id,pdb_dir,out_dir,indicator,probe_size)
+
+
+
+if __name__ == '__main__':
+	main()
