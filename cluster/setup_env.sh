@@ -23,7 +23,7 @@
 # dependency at runtime.
 set -euo pipefail
 
-PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_autoencoder_project"
+PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder"
 VENV_DIR="$PROJECT_DIR/venv"
 
 PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')

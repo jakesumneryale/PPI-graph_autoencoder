@@ -6,7 +6,7 @@
 # commit step only ever swaps in a fully-written temp copy of the graph file.
 set -euo pipefail
 
-PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_autoencoder_project"
+PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder"
 GRAPH_DATA_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs"
 PDB_BASE_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/pdb_complex_directory"
 RUN_DIR="$PROJECT_DIR/voronoi_run"

@@ -7,8 +7,8 @@
 #SBATCH --time=16:00:00
 #SBATCH --requeue
 #SBATCH --signal=B:TERM@120
-#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/ppi_autoencoder_project/voronoi_run/logs/%x_%A_%a.out
-#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/ppi_autoencoder_project/voronoi_run/logs/%x_%A_%a.err
+#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
+#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
 #
 # 146 targets, one per array task. The %64 throttle caps concurrency at 64
 # simultaneous 1-CPU/8GB tasks -- the same aggregate budget as "4 nodes x 16
@@ -30,4 +30,4 @@
 # cluster/resubmit_failed.sh instead of resubmitting this whole array.
 
 set -euo pipefail
-bash /nfs/roberts/project/pi_co54/jas485/ppi_autoencoder_project/cluster/run_target.sh
+bash /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/cluster/run_target.sh

@@ -5,7 +5,7 @@
 # so this never redoes finished work.
 set -euo pipefail
 
-PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_autoencoder_project"
+PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder"
 RUN_DIR="$PROJECT_DIR/voronoi_run"
 TARGETS_FILE="$PROJECT_DIR/cluster/targets.txt"
 COMMIT_MARKER_DIR="$RUN_DIR/committed"
