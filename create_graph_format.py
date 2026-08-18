@@ -180,19 +180,14 @@ def add_target_scores(hdf5_file_path,score_name, score_csv_path):
 
     graph_fh=Path(hdf5_file_path)
     with h5py.File(graph_fh,'r+') as fh:
-
-        all_graphs=list(fh.keys())
-
         for ind in scores.index:
             
             row=scores.iloc[ind]
             decoy_name=row['Decoy']
             score=row[score_name]
 
-
             try:
-                graph_name=list(filter(lambda x: decoy_name in x, all_graphs))
-                decoy_group=fh[graph_name]
+                decoy_group=fh[decoy_name]
                 score_group=decoy_group.create_group('target_scores')
                 score_group.create_dataset(score_name,data=score)
 
@@ -213,12 +208,6 @@ def main():
 
 
     initialize_graphs(pdb_id,pdb_dir,out_dir,indicator,probe_size)
-
-    graph_fh=Path(out_dir) / Path(f'{pdb_id}.hdf5')
-    score_name='DockQ'
-    score_csv_path=Path('/gpfs/gibbs/pi/ohern/nb685/Decoys/Balanced_Dataset/all_supersampled_balanced_csv') / Path(f'{pdb_id}_supersampled_balanced_scores.csv')
-
-    add_target_scores(graph_fh,score_name,score_csv_path)
 
 
 

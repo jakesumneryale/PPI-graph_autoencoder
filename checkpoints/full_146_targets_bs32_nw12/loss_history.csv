@@ -1,0 +1,1 @@
+epoch,train_loss,train_node_mse,train_edge_attr_mse,train_edge_presence_bce,train_target_mse,val_loss,val_node_mse,val_edge_attr_mse,val_edge_presence_bce,val_target_mse,test_loss,test_node_mse,test_edge_attr_mse,test_edge_presence_bce,test_target_mse
