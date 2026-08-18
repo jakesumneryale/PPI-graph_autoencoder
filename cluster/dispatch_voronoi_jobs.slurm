@@ -4,7 +4,7 @@
 #SBATCH --array=1-146%64
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=8G
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --requeue
 #SBATCH --signal=B:TERM@120
 #SBATCH --output=/nfs/roberts/project/pi_co54/jas485/ppi_autoencoder_project/voronoi_run/logs/%x_%A_%a.out
