@@ -2,3 +2,10 @@ numpy
 h5py
 torch
 torch-geometric
+pandas
+scipy
+pyvoro-mmalahe
+pyvista
+trimesh
+biopython
+freesasa

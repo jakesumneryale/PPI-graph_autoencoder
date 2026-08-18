@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+import signal
 import time
 
 import h5py
@@ -14,6 +15,7 @@ from voronoi_edge_features.common import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_REFERENCE_DIR,
     default_graph_data_path,
+    resolve_target_graph_hdf5,
     target_name_from_dir,
     target_output_hdf5_path,
     target_summary_csv_path,
@@ -33,6 +35,13 @@ from voronoi_edge_features.model_reference import (
 
 
 STRING_DTYPE = h5py.string_dtype(encoding="utf-8")
+
+_stop_requested = False
+
+
+def _request_stop(signum, frame) -> None:  # noqa: ARG001
+    global _stop_requested
+    _stop_requested = True
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,15 +71,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-every", type=int, default=25)
     parser.add_argument("--cluster", action="store_true", help="Use cluster default graph-data paths.")
     return parser.parse_args()
-
-
-def resolve_target_graph_hdf5(graph_data_dir: str | Path, target_name: str) -> Path:
-    graph_data_dir = Path(graph_data_dir)
-    for suffix in (".hdf5", ".h5"):
-        candidate = graph_data_dir / f"{target_name}{suffix}"
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(f"Could not find {target_name}.hdf5 or {target_name}.h5 in {graph_data_dir}")
 
 
 def ensure_reference_file(target_name: str, graph_hdf5_path: Path, reference_dir: str | Path) -> Path:
@@ -158,6 +158,9 @@ def maybe_write_graph_feature(
 
 
 def main() -> None:
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+
     args = parse_args()
     if args.data is None:
         args.data = default_graph_data_path(cluster=args.cluster)
@@ -190,6 +193,13 @@ def main() -> None:
         output_handle.attrs["probe_size"] = float(args.probe_size)
 
         for index, reference in enumerate(references, start=1):
+            if _stop_requested:
+                print(
+                    f"  stop signal received; halting after {index - 1}/{len(references)} models. "
+                    "Rerun the same command to resume from here."
+                )
+                break
+
             start_time = time.time()
             pdb_path = target_dir / reference.relative_pdb_path
             row = {

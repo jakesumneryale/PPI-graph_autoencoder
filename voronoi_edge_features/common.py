@@ -60,6 +60,15 @@ def reference_txt_path(reference_dir: str | Path, target_name: str) -> Path:
     return Path(reference_dir) / f"{target_name}.txt"
 
 
+def resolve_target_graph_hdf5(graph_data_dir: str | Path, target_name: str) -> Path:
+    graph_data_dir = Path(graph_data_dir)
+    for suffix in (".hdf5", ".h5"):
+        candidate = graph_data_dir / f"{target_name}{suffix}"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"Could not find {target_name}.hdf5 or {target_name}.h5 in {graph_data_dir}")
+
+
 def target_output_hdf5_path(output_dir: str | Path, target_name: str) -> Path:
     return Path(output_dir) / f"{target_name}_voronoi_contact_areas.hdf5"
 
