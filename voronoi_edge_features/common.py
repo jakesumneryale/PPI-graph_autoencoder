@@ -16,8 +16,8 @@ DEFAULT_GRAPH_DATA_DIR = Path("/scratch/ppi_autoencoder_code/processed_graph_dat
 CLUSTER_GRAPH_DATA_DIR = Path("/home/jas485/project_pi_co54/jas485/ppi_processed_graphs")
 GRAPH_DATA_ENV_VAR = "PPI_HDF5_DATA"
 
-POSITIVE_MODEL_PATTERN = re.compile(r"^complex\.\d{1,2}_\d{1,2}_\d{1,2}_corrected$")
-NEGATIVE_MODEL_PATTERN = re.compile(r"^complex\.\d{1,5}_\d_corrected$")
+POSITIVE_MODEL_PATTERN = re.compile(r"^complex\.\d{1,2}_\d{1,2}_\d{1,2}(?:_corrected)?$")
+NEGATIVE_MODEL_PATTERN = re.compile(r"^complex\.\d{1,5}_\d(?:_corrected)?$")
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,8 @@ def infer_relative_pdb_path(target_name: str, graph_group_name: str) -> tuple[st
 
     raise ValueError(
         "Unsupported graph/model naming scheme for "
-        f"{graph_group_name!r}. Expected complex.X_X_X_corrected or complex.X_X_corrected."
+        f"{graph_group_name!r}. Expected complex.X_X_X or complex.X_X, "
+        "optionally suffixed with _corrected."
     )
 
 
