@@ -1,202 +1,207 @@
-### GATE MODEL CODE
-### Jake Sumner
-### 3/10/25
+"""Graph attention autoencoder models for PPI contact graphs."""
 
+from __future__ import annotations
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GATConv, global_mean_pool
+from torch_geometric.nn import GATConv, global_max_pool, global_mean_pool
+
 
 class GraphAttentionAutoencoder(nn.Module):
-    def __init__(self, in_node_feats, in_edge_feats, hidden_dim, latent_dim, num_nodes, num_edges, threshold=0.5):
-        """
-        Args:
-            in_node_feats (int): Number of input node features.
-            in_edge_feats (int): Number of input edge features.
-            hidden_dim (int): Hidden dimension for intermediate layers.
-            latent_dim (int): Dimension of the latent embedding Z.
-            num_nodes (int): Number of nodes in the graph (assumed fixed).
-            num_edges (int): Number of edges in the graph (assumed fixed).
-            threshold (float): Threshold to binarize the reconstructed connectivity matrix.
-        """
-        super(GraphAttentionAutoencoder, self).__init__()
-        # Encoder: Two GAT layers.
-        self.gat1 = GATConv(in_channels=in_node_feats, out_channels=hidden_dim, heads=1, concat=True)
-        self.gat2 = GATConv(in_channels=hidden_dim, out_channels=latent_dim, heads=1, concat=False)
-        self.num_nodes = num_nodes
-        self.num_edges = num_edges
-        self.threshold = threshold
+    """Variable-size graph attention autoencoder for PyG ``Data`` batches.
 
-        # Decoder: Three separate heads.
-        # Node feature decoder: outputs a vector that is reshaped to (num_nodes, in_node_feats)
+    The HDF5 graphs in this project contain a variable number of residues and
+    contacts per decoy, so reconstruction heads operate on node and edge
+    embeddings instead of decoding to one fixed-size adjacency matrix.
+    """
+
+    def __init__(
+        self,
+        in_node_feats: int,
+        in_edge_feats: int,
+        hidden_dim: int = 64,
+        latent_dim: int = 32,
+        gat_heads: int = 4,
+        dropout: float = 0.1,
+        predict_target: bool = True,
+    ) -> None:
+        super().__init__()
+        if in_node_feats <= 0:
+            raise ValueError("in_node_feats must be positive.")
+        if in_edge_feats < 0:
+            raise ValueError("in_edge_feats cannot be negative.")
+
+        self.in_node_feats = in_node_feats
+        self.in_edge_feats = in_edge_feats
+        self.hidden_dim = hidden_dim
+        self.latent_dim = latent_dim
+        self.dropout = dropout
+
+        edge_dim = in_edge_feats or None
+        self.gat1 = GATConv(
+            in_channels=in_node_feats,
+            out_channels=hidden_dim,
+            heads=gat_heads,
+            concat=True,
+            dropout=dropout,
+            edge_dim=edge_dim,
+        )
+        self.gat2 = GATConv(
+            in_channels=hidden_dim * gat_heads,
+            out_channels=hidden_dim,
+            heads=gat_heads,
+            concat=True,
+            dropout=dropout,
+            edge_dim=edge_dim,
+        )
+        self.node_projector = nn.Linear(hidden_dim * gat_heads, latent_dim)
+
         self.node_decoder = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_nodes * in_node_feats)
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, in_node_feats),
         )
-        # Edge feature decoder: outputs a vector that is reshaped to (num_edges, in_edge_feats)
         self.edge_decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
+            nn.Linear(2 * latent_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_edges * in_edge_feats)
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, in_edge_feats),
         )
-        # Connectivity decoder: outputs a vector that is reshaped to (num_nodes, num_nodes)
-        # A sigmoid activation is used to constrain the outputs between 0 and 1.
-        self.conn_decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
+        self.link_decoder = nn.Sequential(
+            nn.Linear(4 * latent_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_nodes * num_nodes),
-            nn.Sigmoid()
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1),
         )
-        
-    def encode(self, data):
-        """
-        Encodes the input graph data into a latent vector Z.
-        Expects a torch_geometric.data.Data object with attributes:
-          - x: node feature matrix of shape [num_nodes, in_node_feats]
-          - edge_index: edge list tensor of shape [2, num_edges]
-          - batch (optional): batch vector if using multiple graphs in one batch.
-        """
-        x, edge_index = data.x, data.edge_index
-        # If no batch info is provided, assume a single graph.
-        batch = data.batch if hasattr(data, 'batch') else torch.zeros(x.size(0), dtype=torch.long, device=x.device)
-        x = F.relu(self.gat1(x, edge_index))
-        x = self.gat2(x, edge_index)
-        # Global mean pooling to obtain a latent vector Z per graph.
-        Z = global_mean_pool(x, batch)  # shape: [num_graphs, latent_dim]
-        return Z
+        self.graph_projector = nn.Sequential(
+            nn.Linear(2 * latent_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, latent_dim),
+        )
+        self.quality_head = (
+            nn.Sequential(
+                nn.Linear(latent_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, 1),
+            )
+            if predict_target
+            else None
+        )
 
-    def decode(self, Z):
+    def encode(self, data):
+        """Encode a PyG ``Data`` or ``Batch`` object.
+
+        Expected attributes:
+            x: ``[total_nodes, in_node_feats]`` residue/node features.
+            edge_index: ``[2, total_edges]`` contact edges.
+            edge_attr: optional ``[total_edges, in_edge_feats]`` edge features.
+            batch: optional node-to-graph assignment vector.
         """
-        Decodes a latent vector (or a batch of latent vectors) Z back into the graph components.
-        
-        Args:
-            Z (torch.Tensor): Latent embedding(s) of shape [latent_dim] or [batch_size, latent_dim].
-        
-        Returns:
-            dict or list: If a single latent vector is provided, returns a dictionary with:
-                - node_recon: Reconstructed node feature matrix.
-                - edge_recon: Reconstructed edge feature matrix.
-                - conn_matrix: Reconstructed connectivity matrix.
-                - predicted_edge_list: Edge list derived from thresholding the connectivity matrix.
-            If a batch is provided, returns a list of such dictionaries.
-        """
-        if Z.dim() == 1:
-            # Decode a single graph's latent vector
-            node_recon = self.node_decoder(Z).view(self.num_nodes, -1)
-            edge_recon = self.edge_decoder(Z).view(self.num_edges, -1)
-            conn_matrix = self.conn_decoder(Z).view(self.num_nodes, self.num_nodes)
-            predicted_edge_list = (conn_matrix > self.threshold).nonzero(as_tuple=False)
-            return {
-                "node_recon": node_recon,
-                "edge_recon": edge_recon,
-                "conn_matrix": conn_matrix,
-                "predicted_edge_list": predicted_edge_list
-            }
-        elif Z.dim() == 2:
-            # Decode a batch of latent vectors
-            decoded_list = []
-            for z in Z:
-                node_recon = self.node_decoder(z).view(self.num_nodes, -1)
-                edge_recon = self.edge_decoder(z).view(self.num_edges, -1)
-                conn_matrix = self.conn_decoder(z).view(self.num_nodes, self.num_nodes)
-                predicted_edge_list = (conn_matrix > self.threshold).nonzero(as_tuple=False)
-                decoded_list.append({
-                    "node_recon": node_recon,
-                    "edge_recon": edge_recon,
-                    "conn_matrix": conn_matrix,
-                    "predicted_edge_list": predicted_edge_list
-                })
-            return decoded_list
-        else:
-            raise ValueError("Latent vector Z must be 1D or 2D.")
+        x = data.x.float()
+        edge_index = data.edge_index.long()
+        edge_attr = getattr(data, "edge_attr", None)
+        if edge_attr is not None:
+            edge_attr = edge_attr.float()
+
+        batch = getattr(data, "batch", None)
+        if batch is None:
+            batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+
+        h = self.gat1(x, edge_index, edge_attr=edge_attr)
+        h = F.elu(h)
+        h = F.dropout(h, p=self.dropout, training=self.training)
+        h = self.gat2(h, edge_index, edge_attr=edge_attr)
+        h = F.elu(h)
+
+        node_z = self.node_projector(h)
+        pooled = torch.cat(
+            [global_mean_pool(node_z, batch), global_max_pool(node_z, batch)],
+            dim=-1,
+        )
+        graph_z = self.graph_projector(pooled)
+        return node_z, graph_z
+
+    def decode_edge_features(self, node_z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        """Reconstruct edge attributes for the provided edge list."""
+        if self.in_edge_feats == 0:
+            return node_z.new_empty((edge_index.size(1), 0))
+        src, dst = edge_index
+        edge_inputs = torch.cat([node_z[src], node_z[dst]], dim=-1)
+        return self.edge_decoder(edge_inputs)
+
+    def decode_edge_logits(self, node_z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        """Score whether each pair in ``edge_index`` should be connected."""
+        src, dst = edge_index
+        src_z = node_z[src]
+        dst_z = node_z[dst]
+        pair_features = torch.cat(
+            [src_z, dst_z, torch.abs(src_z - dst_z), src_z * dst_z],
+            dim=-1,
+        )
+        return self.link_decoder(pair_features).view(-1)
+
+    def decode(self, node_z: torch.Tensor, graph_z: torch.Tensor, data):
+        edge_index = data.edge_index.long()
+        node_recon = self.node_decoder(node_z)
+        edge_recon = self.decode_edge_features(node_z, edge_index)
+        edge_logits = self.decode_edge_logits(node_z, edge_index)
+        quality_pred = self.quality_head(graph_z).view(-1) if self.quality_head else None
+        return {
+            "node_recon": node_recon,
+            "edge_recon": edge_recon,
+            "edge_logits": edge_logits,
+            "quality_pred": quality_pred,
+        }
 
     def forward(self, data):
-        """
-        Forward pass that first encodes the graph data into Z and then decodes Z back into graph components.
-        """
-        Z = self.encode(data)
-        decoded = self.decode(Z)
-        if isinstance(decoded, list):
-            return {"decoded": decoded, "Z": Z}
-        else:
-            return {**decoded, "Z": Z}
+        node_z, graph_z = self.encode(data)
+        decoded = self.decode(node_z, graph_z, data)
+        return {
+            **decoded,
+            "node_embeddings": node_z,
+            "graph_embeddings": graph_z,
+        }
 
 
 class PredictiveModel(nn.Module):
-    def __init__(self, latent_dim, hidden_dim):
-        """
-        Predictive model that takes the latent vector Z as input and predicts one output feature.
-        It uses two linear layers with a ReLU activation between them, and applies softmax at the final layer.
-        
-        Args:
-            latent_dim (int): Dimension of the input latent vector.
-            hidden_dim (int): Hidden dimension for the intermediate layer.
-        """
-        super(PredictiveModel, self).__init__()
+    """Small scalar regressor for graph-level latent vectors."""
+
+    def __init__(self, latent_dim: int, hidden_dim: int) -> None:
+        super().__init__()
         self.fc1 = nn.Linear(latent_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 1)  # output dimension is 1
-      
+        self.fc2 = nn.Linear(hidden_dim, 1)
 
-    def forward(self, z):
-        """
-        Args:
-            z (torch.Tensor): The latent vector (shape: [latent_dim]) or a batch of latent vectors.
-        Returns:
-            torch.Tensor: Predicted output with softmax applied.
-        """
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
         x = F.relu(self.fc1(z))
-        x = self.fc2(x)
-        return x
+        return self.fc2(x).view(-1)
 
 
-# === Example Usage ===
-if __name__ == '__main__':
+if __name__ == "__main__":
     from torch_geometric.data import Data
 
-    # Suppose we have a graph with 5 nodes and 8 edges.
     num_nodes = 5
     num_edges = 8
-    in_node_feats = 10
-    in_edge_feats = 3
-    hidden_dim = 16
-    latent_dim = 8
+    in_node_feats = 22
+    in_edge_feats = 2
 
-    # Dummy data (for a single graph)
     x = torch.randn((num_nodes, in_node_feats))
     edge_index = torch.randint(0, num_nodes, (2, num_edges))
     edge_attr = torch.randn((num_edges, in_edge_feats))
-    
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    
-    # Instantiate the autoencoder model
+
     model = GraphAttentionAutoencoder(
         in_node_feats=in_node_feats,
         in_edge_feats=in_edge_feats,
-        hidden_dim=hidden_dim,
-        latent_dim=latent_dim,
-        num_nodes=num_nodes,
-        num_edges=num_edges,
-        threshold=0.5
+        hidden_dim=32,
+        latent_dim=16,
     )
-    
-    # Forward pass: encode and decode
     output = model(data)
-    
-    print("Reconstructed node features:")
-    print(output["node_recon"])
-    print("\nReconstructed edge features:")
-    print(output["edge_recon"])
-    print("\nReconstructed connectivity matrix:")
-    print(output["conn_matrix"])
-    print("\nPredicted edge list (indices where connectivity > threshold):")
-    print(output["predicted_edge_list"])
-    print("\nLatent vector Z:")
-    print(output["Z"])
-    
-    # Decoding directly from a latent vector Z
-    Z = output["Z"][0] if output["Z"].dim() > 1 else output["Z"]
-    decoded_output = model.decode(Z)
-    print("\nDecoded output from provided latent vector Z:")
-    print(decoded_output)
+    print("node_recon", tuple(output["node_recon"].shape))
+    print("edge_recon", tuple(output["edge_recon"].shape))
+    print("edge_logits", tuple(output["edge_logits"].shape))
+    print("quality_pred", tuple(output["quality_pred"].shape))
+    print("graph_embeddings", tuple(output["graph_embeddings"].shape))
