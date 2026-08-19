@@ -8,7 +8,7 @@ set -euo pipefail
 
 PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder"
 GRAPH_DATA_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs"
-PDB_BASE_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/pdb_complex_directory"
+PDB_BASE_DIR="/nfs/roberts/project/pi_co54/jas485/uniformly_sampled_target_data"
 RUN_DIR="$PROJECT_DIR/voronoi_run"
 TARGETS_FILE="$PROJECT_DIR/cluster/targets.txt"
 COMMIT_MARKER_DIR="$RUN_DIR/committed"
@@ -39,6 +39,7 @@ cd "$PROJECT_DIR"
 echo "=== [$(date)] Phase A: compute (target=$TARGET_NAME, array_task=$SLURM_ARRAY_TASK_ID, node=$SLURM_JOB_NODELIST) ==="
 python generate_voronoi_contact_area_data.py \
   "$PDB_BASE_DIR/$TARGET_NAME" \
+  --pdb-root "$PDB_BASE_DIR" \
   --data "$GRAPH_DATA_DIR" \
   --feature-name "$FEATURE_NAME" \
   --log-every 50

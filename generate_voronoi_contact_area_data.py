@@ -53,6 +53,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("target_dir", help="Full path to the target directory, e.g. /full/path/to/<target_name>")
     parser.add_argument("--data", help="Directory containing target graph HDF5 files.")
+    parser.add_argument(
+        "--pdb-root",
+        help=(
+            "Directory that directly contains sampled_<target_name>/ (and, inside it, "
+            "random_negatives/). Defaults to target_dir, i.e. sampled_<target_name>/ is "
+            "expected to be nested inside target_dir. Pass this when sampled_<target_name>/ "
+            "instead sits directly under a shared directory, independent of target_dir."
+        ),
+    )
     parser.add_argument("--reference-dir", default=str(DEFAULT_REFERENCE_DIR))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--probe-size", type=float, default=1.4)
@@ -166,6 +175,7 @@ def main() -> None:
         args.data = default_graph_data_path(cluster=args.cluster)
 
     target_dir = Path(args.target_dir).resolve()
+    pdb_root = Path(args.pdb_root).resolve() if args.pdb_root else target_dir
     target_name = target_name_from_dir(target_dir)
     graph_hdf5_path = resolve_target_graph_hdf5(args.data, target_name)
     reference_csv = ensure_reference_file(target_name, graph_hdf5_path, args.reference_dir)
@@ -201,7 +211,7 @@ def main() -> None:
                 break
 
             start_time = time.time()
-            pdb_path = target_dir / reference.relative_pdb_path
+            pdb_path = pdb_root / reference.relative_pdb_path
             row = {
                 "target_name": target_name,
                 "graph_group_name": reference.graph_group_name,

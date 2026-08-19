@@ -38,7 +38,8 @@ def target_name_from_dir(target_dir: str | Path) -> str:
 
 def infer_relative_pdb_path(target_name: str, graph_group_name: str) -> tuple[str, str]:
     sampled_dir = Path(f"sampled_{target_name}")
-    pdb_filename = f"{graph_group_name}_H_0001.pdb"
+    base_name = graph_group_name.removesuffix("_corrected")
+    pdb_filename = f"{base_name}_corrected_H_0001.pdb"
 
     if POSITIVE_MODEL_PATTERN.fullmatch(graph_group_name):
         return str(sampled_dir / pdb_filename), "sampled"
