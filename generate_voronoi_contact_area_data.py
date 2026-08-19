@@ -83,11 +83,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def ensure_reference_file(target_name: str, graph_hdf5_path: Path, reference_dir: str | Path) -> Path:
-    reference_dir = Path(reference_dir)
-    reference_csv = reference_dir / f"{target_name}.csv"
-    if reference_csv.exists():
-        return reference_csv
-
+    # Always rebuilt: it's just an HDF5 key listing plus string logic (cheap), and
+    # reusing a stale file here would silently keep serving PDB paths computed by
+    # whatever path-inference logic was active the first time this target was run.
     references = build_target_model_references(graph_hdf5_path, target_name)
     csv_path, _ = write_target_model_references(references, reference_dir, target_name)
     return csv_path
