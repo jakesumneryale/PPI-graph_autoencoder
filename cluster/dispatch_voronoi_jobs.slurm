@@ -21,7 +21,9 @@
 #
 # cluster/targets.txt ships with the 146 current target names (one per
 # line, line N = array task N). Before submitting the full array: run
-# cluster/setup_env.sh once. If the target set ever changes, rerun
+# cluster/setup_env.sh once; it loads miniconda and uses py311_env to build the
+# project venv. Each worker recreates that interpreter context and then
+# activates the venv. If the target set ever changes, rerun
 # cluster/list_targets.py and update --array above to match the new count.
 # Test with `sbatch --array=1` first to validate the environment on one
 # target before launching the full array.

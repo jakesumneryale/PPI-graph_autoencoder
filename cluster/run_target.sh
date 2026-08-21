@@ -47,6 +47,13 @@ if [[ -f "$MARKER" ]]; then
   exit 0
 fi
 
+# Recreate the same interpreter context used to build the venv. Loading Conda
+# first is important on compute nodes when the venv's Python comes from the
+# py311_env installation.
+module load miniconda
+CONDA_BASE=$(conda info --base)
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+conda activate py311_env
 source "$PROJECT_DIR/venv/bin/activate"
 cd "$PROJECT_DIR"
 
