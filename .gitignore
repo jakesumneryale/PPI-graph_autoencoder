@@ -1,2 +1,5 @@
 balanced_graphs.zip
 data_for_training/
+__pycache__/
+*.py[cod]
+voronoi_demo_outputs/
