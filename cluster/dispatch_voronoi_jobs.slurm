@@ -26,8 +26,10 @@
 # Test with `sbatch --array=1` first to validate the environment on one
 # target before launching the full array.
 #
-# To resubmit only incomplete/failed targets after a run, use
-# cluster/resubmit_failed.sh instead of resubmitting this whole array.
+# A target whose PDB directory or graph HDF5 is absent is logged and cleanly
+# skipped without affecting other array tasks. To resubmit only incomplete,
+# available targets after a run, use cluster/resubmit_failed.sh instead of
+# resubmitting this whole array.
 
 set -euo pipefail
 bash /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/cluster/run_target.sh

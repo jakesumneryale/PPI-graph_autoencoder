@@ -6,9 +6,9 @@
 # commit step only ever swaps in a fully-written temp copy of the graph file.
 set -euo pipefail
 
-PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder"
-GRAPH_DATA_DIR="/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs"
-PDB_BASE_DIR="/nfs/roberts/project/pi_co54/jas485/uniformly_sampled_target_data"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+PDB_BASE_DIR="${PDB_BASE_DIR:-/nfs/roberts/project/pi_co54/jas485/uniformly_sampled_target_data}"
 RUN_DIR="$PROJECT_DIR/voronoi_run"
 TARGETS_FILE="$PROJECT_DIR/cluster/targets.txt"
 COMMIT_MARKER_DIR="$RUN_DIR/committed"
@@ -27,6 +27,20 @@ if [[ -z "$TARGET_NAME" ]]; then
   exit 1
 fi
 
+# A few graph targets may not yet have validated structure inputs. Since each
+# array task is independent, skip an unavailable target cleanly. Deliberately
+# do not create its completion marker, so adding the input later makes it
+# eligible for a future submission.
+TARGET_DIR="$PDB_BASE_DIR/$TARGET_NAME"
+if [[ ! -d "$TARGET_DIR" ]]; then
+  echo "SKIP: $TARGET_NAME has no PDB target directory at $TARGET_DIR" >&2
+  exit 0
+fi
+if [[ ! -f "$GRAPH_DATA_DIR/${TARGET_NAME}.hdf5" && ! -f "$GRAPH_DATA_DIR/${TARGET_NAME}.h5" ]]; then
+  echo "SKIP: $TARGET_NAME has no graph HDF5 in $GRAPH_DATA_DIR" >&2
+  exit 0
+fi
+
 MARKER="$COMMIT_MARKER_DIR/${TARGET_NAME}.done"
 if [[ -f "$MARKER" ]]; then
   echo "$TARGET_NAME already fully committed; skipping."
@@ -36,9 +50,9 @@ fi
 source "$PROJECT_DIR/venv/bin/activate"
 cd "$PROJECT_DIR"
 
-echo "=== [$(date)] Phase A: compute (target=$TARGET_NAME, array_task=$SLURM_ARRAY_TASK_ID, node=$SLURM_JOB_NODELIST) ==="
+echo "=== [$(date)] Phase A: compute (target=$TARGET_NAME, array_task=$SLURM_ARRAY_TASK_ID, node=${SLURM_JOB_NODELIST:-unknown}) ==="
 python generate_voronoi_contact_area_data.py \
-  "$PDB_BASE_DIR/$TARGET_NAME" \
+  "$TARGET_DIR" \
   --pdb-root "$PDB_BASE_DIR" \
   --data "$GRAPH_DATA_DIR" \
   --feature-name "$FEATURE_NAME" \

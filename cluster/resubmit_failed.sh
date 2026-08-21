@@ -5,7 +5,9 @@
 # so this never redoes finished work.
 set -euo pipefail
 
-PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+PDB_BASE_DIR="${PDB_BASE_DIR:-/nfs/roberts/project/pi_co54/jas485/uniformly_sampled_target_data}"
 RUN_DIR="$PROJECT_DIR/voronoi_run"
 TARGETS_FILE="$PROJECT_DIR/cluster/targets.txt"
 COMMIT_MARKER_DIR="$RUN_DIR/committed"
@@ -16,17 +18,31 @@ if [[ ! -f "$TARGETS_FILE" ]]; then
 fi
 
 indices=()
+unavailable=()
 idx=0
 while IFS= read -r target; do
   idx=$((idx + 1))
   [[ -z "$target" ]] && continue
+  if [[ ! -d "$PDB_BASE_DIR/$target" ]]; then
+    unavailable+=("$target (PDB directory missing)")
+    continue
+  fi
+  if [[ ! -f "$GRAPH_DATA_DIR/${target}.hdf5" && ! -f "$GRAPH_DATA_DIR/${target}.h5" ]]; then
+    unavailable+=("$target (graph HDF5 missing)")
+    continue
+  fi
   if [[ ! -f "$COMMIT_MARKER_DIR/${target}.done" ]]; then
     indices+=("$idx")
   fi
 done < "$TARGETS_FILE"
 
+if [[ ${#unavailable[@]} -gt 0 ]]; then
+  echo "Skipping ${#unavailable[@]} unavailable target(s):"
+  printf '  %s\n' "${unavailable[@]}"
+fi
+
 if [[ ${#indices[@]} -eq 0 ]]; then
-  echo "All targets complete."
+  echo "All available targets complete."
   exit 0
 fi
 
