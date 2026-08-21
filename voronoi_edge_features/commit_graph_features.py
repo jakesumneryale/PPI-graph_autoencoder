@@ -33,6 +33,7 @@ from voronoi_edge_features.common import (
     reference_csv_path,
     resolve_target_graph_hdf5,
     target_output_hdf5_path,
+    checkpoint_model_is_complete,
 )
 from voronoi_edge_features.model_reference import load_target_model_references
 
@@ -78,7 +79,11 @@ def main() -> None:
         sys.exit(1)
 
     with h5py.File(checkpoint_path, "r") as checkpoint_handle:
-        computed_group_names = set(checkpoint_handle.keys()) & all_group_names
+        computed_group_names = {
+            name
+            for name in (set(checkpoint_handle.keys()) & all_group_names)
+            if checkpoint_model_is_complete(checkpoint_handle[name])
+        }
         if not computed_group_names:
             print(f"No computed models found in {checkpoint_path}; nothing to commit.", file=sys.stderr)
             sys.exit(1)

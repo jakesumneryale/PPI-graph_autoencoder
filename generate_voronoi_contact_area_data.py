@@ -19,6 +19,7 @@ from voronoi_edge_features.common import (
     target_name_from_dir,
     target_output_hdf5_path,
     target_summary_csv_path,
+    checkpoint_model_is_complete,
 )
 from voronoi_edge_features.contact_area import (
     align_contact_areas_to_graph_edges,
@@ -229,15 +230,6 @@ def main() -> None:
                 if not pdb_path.exists():
                     raise FileNotFoundError(f"Model file not found: {pdb_path}")
 
-                if reference.graph_group_name in output_handle:
-                    if args.overwrite:
-                        del output_handle[reference.graph_group_name]
-                    else:
-                        row["status"] = "skipped_exists"
-                        row["message"] = "Output group already exists. Use --overwrite to recompute."
-                        summary_rows.append(row)
-                        continue
-
                 with h5py.File(graph_hdf5_path, "r") as graph_handle:
                     if reference.graph_group_name not in graph_handle:
                         raise KeyError(
@@ -245,6 +237,14 @@ def main() -> None:
                         )
                     graph_group = graph_handle[reference.graph_group_name]
                     graph_contacts = graph_group["edge_features"]["contacts"][()]
+
+                existing_group = output_handle.get(reference.graph_group_name)
+                if existing_group is not None and not args.overwrite:
+                    if checkpoint_model_is_complete(existing_group, expected_graph_edges=len(graph_contacts)):
+                        row["status"] = "skipped_exists"
+                        row["message"] = "Complete checkpoint group already exists."
+                        continue
+                    row["message"] = "Existing checkpoint group was incomplete; recomputing it."
 
                 protein_df = load_protein_dataframe(pdb_path.name, pdb_path.parent)
                 bounded_voronoi_tessellation = compute_bounded_voronoi_tessellation(protein_df, args.probe_size)
@@ -255,7 +255,10 @@ def main() -> None:
                     graph_contacts,
                 )
 
-                output_group = output_handle.create_group(reference.graph_group_name)
+                temporary_group_name = f"__in_progress__{reference.graph_group_name}"
+                if temporary_group_name in output_handle:
+                    del output_handle[temporary_group_name]
+                output_group = output_handle.create_group(temporary_group_name)
                 write_model_output(
                     output_group=output_group,
                     target_name=target_name,
@@ -267,6 +270,13 @@ def main() -> None:
                     aligned_graph_contact_area=aligned_graph_contact_area,
                     missing_mask=missing_mask,
                 )
+                output_handle.flush()
+                if not checkpoint_model_is_complete(output_group, expected_graph_edges=len(graph_contacts)):
+                    raise RuntimeError("New checkpoint group failed completeness validation")
+                if reference.graph_group_name in output_handle:
+                    del output_handle[reference.graph_group_name]
+                output_handle.move(temporary_group_name, reference.graph_group_name)
+                output_handle.flush()
 
                 if args.write_graph_feature:
                     maybe_write_graph_feature(
@@ -282,6 +292,10 @@ def main() -> None:
                 row["num_graph_edges"] = int(len(graph_contacts))
                 row["num_missing_graph_edges"] = int(missing_mask.sum())
             except Exception as exc:  # noqa: BLE001
+                temporary_group_name = f"__in_progress__{reference.graph_group_name}"
+                if temporary_group_name in output_handle:
+                    del output_handle[temporary_group_name]
+                    output_handle.flush()
                 row["status"] = "error"
                 row["message"] = str(exc)
             finally:

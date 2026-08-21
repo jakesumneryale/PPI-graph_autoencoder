@@ -7,5 +7,8 @@ scipy
 pyvoro-mmalahe
 pyvista
 trimesh
+manifold3d
 biopython
 freesasa
+scikit-learn
+matplotlib

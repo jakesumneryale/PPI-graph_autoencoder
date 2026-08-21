@@ -15,6 +15,9 @@ COMMIT_MARKER_DIR="$RUN_DIR/committed"
 FEATURE_NAME="voronoi_contact_area"
 
 mkdir -p "$RUN_DIR/logs" "$COMMIT_MARKER_DIR"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-$RUN_DIR/matplotlib_cache}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$RUN_DIR/cache}"
+mkdir -p "$MPLCONFIGDIR" "$XDG_CACHE_HOME"
 
 if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   echo "This script is meant to be run as a SLURM array task (SLURM_ARRAY_TASK_ID unset)." >&2
@@ -56,6 +59,9 @@ source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate py311_env
 source "$PROJECT_DIR/venv/bin/activate"
 cd "$PROJECT_DIR"
+
+echo "=== [$(date)] Environment preflight (target=$TARGET_NAME) ==="
+python cluster/check_voronoi_environment.py
 
 echo "=== [$(date)] Phase A: compute (target=$TARGET_NAME, array_task=$SLURM_ARRAY_TASK_ID, node=${SLURM_JOB_NODELIST:-unknown}) ==="
 python generate_voronoi_contact_area_data.py \
