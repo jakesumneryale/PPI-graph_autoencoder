@@ -48,4 +48,4 @@ fi
 
 array_spec=$(IFS=,; echo "${indices[*]}")
 echo "Resubmitting ${#indices[@]} incomplete target(s): $array_spec"
-sbatch --array="${array_spec}%64" "$PROJECT_DIR/cluster/dispatch_voronoi_jobs.slurm"
+sbatch --array="${array_spec}%8" "$PROJECT_DIR/cluster/dispatch_voronoi_jobs.slurm"
