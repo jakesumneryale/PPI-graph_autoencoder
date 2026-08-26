@@ -51,7 +51,7 @@ over its points is already an area-weighted mean surface potential.
 | `repack_store.py` | Migrate a pre-existing store to the current on-disk layout |
 | `selfcheck.py` | Fast correctness checks for the pure-Python pieces (no APBS needed) |
 | `export_dx.py` | Regenerate an OpenDX map from stored HDF5 for PyMOL/ChimeraX |
-| `cluster/` | SLURM array job, worker, env setup, preflight, resubmit, progress check |
+| `cluster/` | SLURM array job, worker, env setup + activation, preflight, resubmit, progress check |
 
 ---
 
@@ -88,7 +88,7 @@ just needs the same command again.
 ## Cluster run
 
 ```bash
-bash apbs_analysis/cluster/setup_env.sh          # once
+bash apbs_analysis/cluster/setup_env.sh          # once, see "Naming the environment" below
 python apbs_analysis/cluster/list_targets.py \
     /nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data \
     apbs_analysis/cluster/targets.txt            # only if the target set changed
@@ -108,6 +108,33 @@ array task, resumable, SIGTERM-safe, requeueable — with two differences:
   renamed into place only once fully written, which is all the atomicity needed.
 - **Much smaller memory request** (16 GiB vs 64 GiB). APBS memory is set by the
   grid, which `--memory-ceiling-mb` caps directly, and nothing here builds a mesh.
+
+### Naming the environment
+
+`setup_env.sh` builds the environment with `conda create --prefix`, which
+produces a **nameless** env: it must live on the shared filesystem the compute
+nodes read, not in `~/.conda/envs`, and a prefix env has no name to activate.
+There is no file inside the env that names it — `conda activate <name>` only
+resolves names against the directories listed in `envs_dirs`.
+
+To make `conda activate apbs_env` work, add its parent directory to
+`~/.condarc`. **Order matters**: the first entry is where `conda create -n`
+writes new environments, so keep the default first.
+
+```yaml
+envs_dirs:
+  - /home/jas485/.conda/envs
+  - /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder
+```
+
+`setup_env.sh` detects whether the name already resolves and prints this block
+with the right paths filled in if it does not.
+
+The cluster scripts source `cluster/activate_env.sh`, which tries the short
+name first and falls back to the full prefix. That fallback is deliberate:
+`~/.condarc` lives outside this repo, so an array task should not fail because
+a personal config file was reset. Override the name with `APBS_ENV_NAME` or the
+location with `APBS_ENV_PREFIX`.
 
 Progress/QC for one target:
 

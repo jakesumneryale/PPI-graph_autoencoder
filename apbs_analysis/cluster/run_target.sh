@@ -53,10 +53,7 @@ if [[ -f "$MARKER" ]]; then
   exit 0
 fi
 
-module load miniconda
-CONDA_BASE=$(conda info --base)
-source "$CONDA_BASE/etc/profile.d/conda.sh"
-conda activate "$ENV_PREFIX"
+source "$PROJECT_DIR/apbs_analysis/cluster/activate_env.sh"
 cd "$PROJECT_DIR"
 
 # Intermediates (PQR, APBS input, DX) are node-local so thousands of small
