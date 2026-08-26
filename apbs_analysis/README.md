@@ -190,9 +190,23 @@ shipped `--cpus-per-task=2` means two models at a time per target.
 
 For a 1,400-model target at ~23 s/model that is roughly **9 h single-threaded,
 5.5 h at 2 workers** — before derating for slower cluster cores, so plan on
-8–11 h against the 24 h wall limit. Going past 2 workers needs more memory than
-the shipped 16 GiB (worst case is ~4.5 GiB per concurrent solve); raising the
-array throttle is the cheaper way to buy throughput.
+8–11 h. Going past 2 workers needs more memory than the shipped 16 GiB (worst
+case is ~4.5 GiB per concurrent solve); raising the array throttle is the
+cheaper way to buy throughput.
+
+The array requests **12 h**, deliberately less than a full target needs in the
+worst case. On the shared `day` partition a 12 h request backfills into gaps a
+24 h one cannot reach, and running out of time costs nothing but a resubmit:
+every finished model is already committed, the completion marker is withheld,
+and the next pass resumes exactly where it stopped. Roughly 1,800 median-sized
+models fit in one pass, so most targets finish first time. Run
+
+```bash
+bash apbs_analysis/cluster/resubmit_failed.sh
+```
+
+until it reports `All available targets complete.` — it is idempotent and only
+ever submits targets still missing their marker.
 
 ### Skipping PROPKA
 
