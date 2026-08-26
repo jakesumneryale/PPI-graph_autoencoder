@@ -3,3 +3,8 @@ data_for_training/
 __pycache__/
 *.py[cod]
 voronoi_demo_outputs/
+
+# APBS run artifacts
+apbs_run/
+apbs_env/
+io.mc
