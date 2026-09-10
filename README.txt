@@ -138,3 +138,38 @@ python generate_voronoi_contact_area_data.py \
   --write-graph-feature \
   --feature-name voronoi_contact_area \
   /full/path/to/<target_name>
+
+Auditing and making a balanced 10% dataset
+
+After the cluster Voronoi jobs finish, submit the read-only audit/subset job:
+
+sbatch cluster/audit_voronoi_dataset.slurm
+
+It scans every target HDF5 in
+/home/jas485/project_pi_co54/jas485/ppi_processed_graphs. A model is usable
+only when edge_features/voronoi_contact_area is numeric, finite, and has
+exactly one value per edge_features/contacts row. Existing checkpoint groups
+are also cross-checked and any mismatch is recorded.
+
+Outputs are written under voronoi_dataset_audit:
+
+- successful_models/<target>.txt: one usable HDF5 model key per line
+- model_audit.csv: model-level status and failure reason
+- target_attrition.csv: retained/failed counts per target
+- subset_manifest.csv: every model chosen for the reduced dataset
+- subset_hdf5/<target>.hdf5: independent HDF5 files containing the 10% subset
+
+The subset selection is deterministic. Uniformly sampled models are
+stratified by quality bin 0-19, and randomly sampled models form a separate
+stratum. Counts use proportional allocation so each target's original usable
+distribution is retained as closely as integer sample counts allow.
+
+Use the reduced files, including the Voronoi area, with:
+
+python train_gate.py \
+  --data voronoi_dataset_audit/subset_hdf5 \
+  --edge-features interface_edges,ca_dist,voronoi_contact_area
+
+To run only the audit and success-list generation, use:
+
+python audit_voronoi_dataset.py --audit-only
