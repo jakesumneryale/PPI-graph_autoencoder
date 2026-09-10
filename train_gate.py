@@ -422,6 +422,12 @@ def main() -> None:
     parser.add_argument("--latent-dim", type=int, default=32)
     parser.add_argument("--gat-heads", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument(
+        "--residual-connections",
+        "--residual_connections",
+        action="store_true",
+        help="Use four GAT layers with residual connections instead of the original two-layer encoder.",
+    )
     parser.add_argument("--test-fraction", type=float, default=0.2, help="Fraction of target files reserved for test.")
     parser.add_argument(
         "--val-fraction",
@@ -481,6 +487,7 @@ def main() -> None:
         latent_dim=args.latent_dim,
         gat_heads=args.gat_heads,
         dropout=args.dropout,
+        residual_connections=args.residual_connections,
         predict_target=True,
     ).to(device)
 

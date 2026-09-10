@@ -140,6 +140,7 @@ def build_model_from_checkpoint(checkpoint: dict, device: torch.device) -> Graph
         latent_dim=checkpoint_args["latent_dim"],
         gat_heads=checkpoint_args["gat_heads"],
         dropout=checkpoint_args["dropout"],
+        residual_connections=checkpoint_args.get("residual_connections", False),
         predict_target=True,
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])

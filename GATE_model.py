@@ -25,18 +25,28 @@ class GraphAttentionAutoencoder(nn.Module):
         gat_heads: int = 4,
         dropout: float = 0.1,
         predict_target: bool = True,
+        residual_connections: bool = False,
+        num_gat_layers: int | None = None,
     ) -> None:
         super().__init__()
         if in_node_feats <= 0:
             raise ValueError("in_node_feats must be positive.")
         if in_edge_feats < 0:
             raise ValueError("in_edge_feats cannot be negative.")
+        if num_gat_layers is None:
+            num_gat_layers = 4 if residual_connections else 2
+        if num_gat_layers < 2:
+            raise ValueError("num_gat_layers must be at least 2.")
+        if not residual_connections and num_gat_layers != 2:
+            raise ValueError("More than two GAT layers require residual_connections=True.")
 
         self.in_node_feats = in_node_feats
         self.in_edge_feats = in_edge_feats
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
         self.dropout = dropout
+        self.residual_connections = residual_connections
+        self.num_gat_layers = num_gat_layers
 
         edge_dim = in_edge_feats or None
         self.gat1 = GATConv(
@@ -54,6 +64,22 @@ class GraphAttentionAutoencoder(nn.Module):
             concat=True,
             dropout=dropout,
             edge_dim=edge_dim,
+        )
+        self.extra_gat_layers = nn.ModuleList(
+            GATConv(
+                in_channels=hidden_dim * gat_heads,
+                out_channels=hidden_dim,
+                heads=gat_heads,
+                concat=True,
+                dropout=dropout,
+                edge_dim=edge_dim,
+            )
+            for _ in range(num_gat_layers - 2)
+        )
+        self.input_residual = (
+            nn.Linear(in_node_feats, hidden_dim * gat_heads, bias=False)
+            if residual_connections
+            else None
         )
         self.node_projector = nn.Linear(hidden_dim * gat_heads, latent_dim)
 
@@ -112,10 +138,20 @@ class GraphAttentionAutoencoder(nn.Module):
             batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
 
         h = self.gat1(x, edge_index, edge_attr=edge_attr)
+        if self.residual_connections:
+            h = h + self.input_residual(x)
         h = F.elu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
-        h = self.gat2(h, edge_index, edge_attr=edge_attr)
-        h = F.elu(h)
+
+        gat_layers = (self.gat2, *self.extra_gat_layers)
+        for layer_index, layer in enumerate(gat_layers):
+            residual = h
+            h = layer(h, edge_index, edge_attr=edge_attr)
+            if self.residual_connections:
+                h = h + residual
+            h = F.elu(h)
+            if layer_index < len(gat_layers) - 1:
+                h = F.dropout(h, p=self.dropout, training=self.training)
 
         node_z = self.node_projector(h)
         pooled = torch.cat(

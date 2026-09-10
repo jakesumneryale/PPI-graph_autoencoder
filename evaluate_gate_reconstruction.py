@@ -36,12 +36,14 @@ NODE_FEATURE_DIMS = {
     "aa_type": 20,
     "chain": 1,
     "interface_nodes": 1,
+    "interface_node_degree": 1,
     "rsasa_i": 1,
     "drsasa": 1,
 }
 EDGE_FEATURE_DIMS = {
     "interface_edges": 1,
     "ca_dist": 1,
+    "voronoi_contact_area": 1,
 }
 
 
@@ -528,6 +530,7 @@ def evaluate_checkpoint(
         latent_dim=checkpoint_args["latent_dim"],
         gat_heads=checkpoint_args["gat_heads"],
         dropout=checkpoint_args["dropout"],
+        residual_connections=checkpoint_args.get("residual_connections", False),
         predict_target=True,
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
