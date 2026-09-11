@@ -379,6 +379,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train GATE on PPI graph HDF5 files.")
     parser.add_argument("--cluster", action="store_true", help="Use the cluster default data directories.")
     parser.add_argument("--data", default=None, help="HDF5 file or directory.")
+    parser.add_argument(
+        "--model-list-dir",
+        default=None,
+        help="Optional directory containing <target>.txt files of HDF5 model keys to include.",
+    )
     parser.add_argument("--target-name", default="DockQ")
     parser.add_argument(
         "--node-feature-set",
@@ -477,6 +482,7 @@ def main() -> None:
         max_samples=args.max_samples,
         skip_invalid_files=not args.strict_hdf5,
         optional_node_features_dir=args.optional_node_features_dir,
+        model_list_dir=args.model_list_dir,
     )
     print("Dataset indexed.")
     first_graph = dataset[0]
@@ -628,6 +634,7 @@ def main() -> None:
         split_manifest=str(split_manifest_path),
         target_name=args.target_name,
         optional_node_features_dir=args.optional_node_features_dir,
+        model_list_dir=args.model_list_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         worker_start_method=args.worker_start_method,

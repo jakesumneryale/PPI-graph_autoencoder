@@ -160,6 +160,7 @@ class ProteinGraphHDF5Dataset(Dataset):
         max_samples: int | None = None,
         skip_invalid_files: bool = True,
         optional_node_features_dir: str | Path = DEFAULT_OPTIONAL_NODE_FEATURES_DIR,
+        model_list_dir: str | Path | None = None,
     ) -> None:
         self.paths = _resolve_hdf5_paths(paths)
         self.node_features = tuple(node_features)
@@ -170,6 +171,8 @@ class ProteinGraphHDF5Dataset(Dataset):
         self.include_self_edges = include_self_edges
         self.skip_invalid_files = skip_invalid_files
         self.optional_node_features_dir = Path(optional_node_features_dir)
+        self.model_list_dir = Path(model_list_dir) if model_list_dir is not None else None
+        self.allowed_models = self._load_allowed_models()
         self.hdf5_node_features = tuple(
             feature_name
             for feature_name in self.node_features
@@ -205,7 +208,18 @@ class ProteinGraphHDF5Dataset(Dataset):
                 continue
 
             with h5:
+                allowed = self.allowed_models.get(path.stem) if self.allowed_models is not None else None
+                if allowed is not None:
+                    missing_allowed = allowed - set(h5.keys())
+                    if missing_allowed:
+                        examples = ", ".join(sorted(missing_allowed)[:5])
+                        raise KeyError(
+                            f"{path} is missing {len(missing_allowed)} model(s) named in its model list; "
+                            f"examples: {examples}"
+                        )
                 for group_name in sorted(h5.keys()):
+                    if allowed is not None and group_name not in allowed:
+                        continue
                     group = h5[group_name]
                     if self._is_rich_graph_group(group):
                         has_target = self._has_target(group)
@@ -221,6 +235,28 @@ class ProteinGraphHDF5Dataset(Dataset):
                     if max_samples is not None and len(samples) >= max_samples:
                         return samples
         return samples
+
+    def _load_allowed_models(self) -> dict[str, set[str]] | None:
+        if self.model_list_dir is None:
+            return None
+        if not self.model_list_dir.is_dir():
+            raise FileNotFoundError(f"Model-list directory does not exist: {self.model_list_dir}")
+
+        allowed_models: dict[str, set[str]] = {}
+        for path in self.paths:
+            target = path.stem
+            list_path = self.model_list_dir / f"{target}.txt"
+            if not list_path.is_file():
+                raise FileNotFoundError(f"No model list found for target {target}: {list_path}")
+            names = {
+                line.strip().split("\t", 1)[0]
+                for line in list_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+            # An empty list is valid for a target with complete Voronoi attrition;
+            # that target file contributes no samples but does not block the run.
+            allowed_models[target] = names
+        return allowed_models
 
     def _load_optional_node_feature_values(self) -> dict[str, dict[str, dict[str, float]]]:
         feature_values: dict[str, dict[str, dict[str, float]]] = {}

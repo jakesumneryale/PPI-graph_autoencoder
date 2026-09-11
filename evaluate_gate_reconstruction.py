@@ -66,6 +66,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cluster", action="store_true", help="Use the cluster default data directories.")
     parser.add_argument("--data", default=None, help="HDF5 file or directory.")
+    parser.add_argument("--model-list-dir", default=None)
     parser.add_argument(
         "--split-manifest",
         default="checkpoints/gate_feature_compare_split.json",
@@ -515,6 +516,7 @@ def evaluate_checkpoint(
         max_samples=args.max_samples,
         skip_invalid_files=not args.strict_hdf5,
         optional_node_features_dir=checkpoint_args.get("optional_node_features_dir", args.optional_node_features_dir),
+        model_list_dir=checkpoint_args.get("model_list_dir", args.model_list_dir),
     )
     print(
         "Building evaluation dataloader with "

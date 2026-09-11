@@ -272,6 +272,7 @@ def evaluate_model_by_target(
         max_samples=args.max_samples,
         skip_invalid_files=not args.strict_hdf5,
         optional_node_features_dir=checkpoint_args.get("optional_node_features_dir", args.optional_node_features_dir),
+        model_list_dir=checkpoint_args.get("model_list_dir"),
     )
     print(
         "Building comparison dataloader with "

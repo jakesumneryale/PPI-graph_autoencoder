@@ -24,6 +24,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("data_dir", type=Path, help="Directory containing target .hdf5/.h5 files.")
     parser.add_argument("--report", type=Path, help="Optional per-target summary CSV path.")
+    parser.add_argument(
+        "--model-list-dir",
+        type=Path,
+        help="Optional directory of <target>.txt model lists; unlisted groups are left unchanged.",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Recompute even valid existing datasets.")
     parser.add_argument("--log-every", type=int, default=10)
     return parser.parse_args()
@@ -83,11 +88,18 @@ def dataset_is_valid(dataset: h5py.Dataset, num_nodes: int) -> bool:
     return bool((values >= 0).all() and (values <= num_nodes).all())
 
 
-def process_file(path: Path, overwrite: bool) -> dict[str, object]:
+def process_file(path: Path, overwrite: bool, allowed_models: set[str] | None = None) -> dict[str, object]:
     total = written = skipped = failed = 0
     errors: list[str] = []
     with h5py.File(path, "r+") as handle:
+        if allowed_models is not None:
+            missing = allowed_models - set(handle.keys())
+            if missing:
+                examples = ", ".join(sorted(missing)[:5])
+                raise KeyError(f"{path} is missing {len(missing)} listed model(s); examples: {examples}")
         for model_name in sorted(handle.keys()):
+            if allowed_models is not None and model_name not in allowed_models:
+                continue
             total += 1
             try:
                 model = handle[model_name]
@@ -147,7 +159,17 @@ def main() -> None:
 
     rows = []
     for index, path in enumerate(paths, start=1):
-        row = process_file(path, overwrite=args.overwrite)
+        allowed_models = None
+        if args.model_list_dir is not None:
+            list_path = args.model_list_dir / f"{path.stem}.txt"
+            if not list_path.is_file():
+                raise SystemExit(f"No model list found for {path.stem}: {list_path}")
+            allowed_models = {
+                line.strip().split("\t", 1)[0]
+                for line in list_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+        row = process_file(path, overwrite=args.overwrite, allowed_models=allowed_models)
         rows.append(row)
         if args.log_every and (index % args.log_every == 0 or row["failed_models"]):
             print(
