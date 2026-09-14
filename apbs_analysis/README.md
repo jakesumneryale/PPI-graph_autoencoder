@@ -30,8 +30,13 @@ mostly bulk solvent and protein interior, whereas the per-residue surface
 statistics are the compact, structure-aligned quantity that scales to many
 thousands of models.
 
-Because the surface points are near-equal-area samples, a residue's plain mean
-over its points is already an area-weighted mean surface potential.
+Each surface point carries the area it represents, and a residue's mean is the
+area-weighted average over its points — a true surface integral. This matters:
+PARSE radii span 0.0–2.0 Å, so point areas differ by up to 5.9×, and an
+unweighted mean is wrong by up to 4.2 kT/e on individual residues.
+
+**See [METHODS.md](METHODS.md) for every formula, its units, and the
+assumptions behind it.**
 
 ## Layout
 
@@ -48,6 +53,16 @@ over its points is already an area-weighted mean surface potential.
 | `run_local_84_targets.py` | **Local entry point** — the 84 bound complexes |
 | `inspect_apbs_output.py` | Read-only QC on an output HDF5 |
 | `analysis.py` | pandas loaders for the store |
+| `monomer.py` | Per-chain electrostatics derived from a solved complex |
+| `run_local_84_monomers.py` | **Local entry point** — monomer maps for the 84 |
+| `pymol_export.py` | Unpack a model into PQR + DX + B-factor PDB + a `.pml` |
+| `migrate_area_weighting.py` | Fix pre-area-weighting stores in place |
+| `interaction_map.py` | Complex-minus-monomers interaction potential, map + per-residue |
+| `approach.py` | Debye-screened interaction as a monomer is walked in from long range |
+| `run_local_84_approach.py` | **Local entry point** — approach curves for all 84 dimers |
+| `approach_movie.py` | PyMOL movie of one dimer's approach, annotated with the live energy |
+| `voronoi_pair.py` | Shared radical-Voronoi face between two residues, as a Plotly figure |
+| `notebooks/` | Results notebook, slide-deck builder, and the two-residue Voronoi notebook |
 | `repack_store.py` | Migrate a pre-existing store to the current on-disk layout |
 | `selfcheck.py` | Fast correctness checks for the pure-Python pieces (no APBS needed) |
 | `export_dx.py` | Regenerate an OpenDX map from stored HDF5 for PyMOL/ChimeraX |
@@ -286,6 +301,146 @@ whose insertion codes were dropped, which is why the index is used instead.
 `common.graph_group_candidates(model_id)` gives the graph group names a model id
 may correspond to (the PDB filename is identical for `complex.X_Y_Z` and its
 `_corrected` variant, so that inverse mapping is genuinely ambiguous).
+
+## Visualising in PyMOL
+
+```bash
+python -m apbs_analysis.pymol_export <store.hdf5> 1acb -o ~/Documents/apbs_pymol
+pymol ~/Documents/apbs_pymol/1acb.pml
+```
+
+Writes the structure as PQR (with the PARSE charges and radii APBS used), the
+volumetric map as gzipped OpenDX, a copy of the structure whose B-factor is the
+residue's mean surface potential, the SAS point cloud as pseudo-atoms, and a
+`.pml` that loads them and sets up both colourings. `--all` exports every model;
+`--no-grid` skips the volumetric map when only per-residue colouring is wanted.
+
+Two objects are created: `<id>` coloured continuously by the map (the usual
+APBS picture, ±5 kT/e ramp), and `<id>_resmap` coloured by per-residue mean
+surface potential, with buried residues in grey. Potentials are kT/e throughout.
+
+## Monomer maps
+
+```bash
+python -m apbs_analysis.run_local_84_monomers --workers 3
+```
+
+Solves each chain of each complex **on the complex's own grid and with the
+complex's own charges**, so complex and monomer maps share a bit-identical
+lattice and a difference map is meaningful:
+
+```python
+delta = complex_grid.values - chain_a_grid.values - chain_b_grid.values
+```
+
+`residue_parent_aa_id` on each monomer group maps its residues back to the
+parent complex's `aa_id`. See [METHODS.md](METHODS.md) §7 for why the charges
+are inherited rather than recomputed.
+
+### Interaction potential
+
+```bash
+python -m apbs_analysis.interaction_map <complexes.hdf5> <monomers.hdf5> 1acb -o out/
+```
+
+Writes `Δφ = φ_complex − Σ φ_chains` as a gzipped DX map plus a per-residue CSV.
+It refuses to subtract maps that are not on the same lattice rather than
+returning a plausible-looking wrong answer.
+
+Because the monomers inherit the complex's charges exactly, the Coulombic part
+cancels by superposition and **Δφ isolates the dielectric/ionic boundary change
+on binding** — interface desolvation and altered screening. It is correspondingly
+localised: for 1acb, median |Δφ| falls from 3.33 kT/e within 4 Å of the contact
+zone to 0.0065 kT/e beyond 20 Å. See [METHODS.md](METHODS.md) §8.
+
+The CSV carries two per-residue columns: `interaction_potential` (both maps
+sampled at the same points — a pure field change, use this one) and
+`interaction_potential_own_surface` (each state on its own surface, which also
+includes the surface lost on binding). They agree away from the interface and
+differ by several kT/e on interface residues.
+
+## Approach curves (screened electrostatics vs separation)
+
+```bash
+python -m apbs_analysis.run_local_84_approach --workers 4
+```
+
+Walks the smaller chain of each dimer from 50 Å in to its crystallographic
+bound pose in 0.5 Å steps, evaluating the Debye-screened interaction at every
+step. **λ_D = 7.86 Å** at 0.150 M (cytosolic), matching the APBS runs.
+
+Per dimer it writes `<id>_approach.csv` (one row per step) and
+`<id>_approach_residues.csv` (one row per step per residue, both chains), plus
+one `approach_summary.csv`.
+
+All 84 are attractive at contact (median −3.62 kcal/mol); screening cuts the
+contact interaction by ~25%; the interaction reaches 0.5 kT at ~11 Å of
+separation; and **16 of 84 flip sign** between long range and contact.
+
+Two caveats that matter for using the numbers: frames flagged `steric_overlap`
+(34 of 84 dimers have some) are **not physical** and should be dropped, and the
+uniform-dielectric model **underestimates** contact energies. See
+[METHODS.md](METHODS.md) §9.
+
+### Movie
+
+```bash
+python -m apbs_analysis.approach_movie <complexes.hdf5> 1kfu -o movies/
+pymol movies/1kfu_movie.py                  # interactive: press play
+pymol -cq movies/1kfu_movie.py -- --render  # PNG frames for a video
+```
+
+Multi-state PDB plus a script that, per frame, recolours the moving chain by
+each residue's share of the interaction and updates an on-screen readout of the
+energy. Both have to be re-applied per frame — PyMOL's B-factor is an atom
+property shared across states, so per-state colouring cannot be baked in.
+
+## Figures and slides
+
+```bash
+cd apbs_analysis/notebooks
+jupyter nbconvert --to notebook --execute --inplace electrostatics_results.ipynb
+python build_slides.py
+```
+
+`electrostatics_results.ipynb` writes eight figures to
+`<output-dir>/figures/` (PNG at 300 dpi and PDF). It uses matplotlib's bundled
+`cmr10` with the `cm` mathtext set, so the Computer Modern look needs no LaTeX
+install; note `\AA` only renders inside math mode, as `$\mathrm{\AA}$`.
+
+`build_slides.py` assembles those figures, two PyMOL stills, and the approach
+movie into `<output-dir>/protein_subgroup_update.pptx`.
+
+## Two-residue Voronoi contact figure
+
+```bash
+conda activate our_env
+python -m apbs_analysis.voronoi_pair --pdb targets_84_complex_only/3dgp_complex_H.pdb \
+    --cache ~/Documents/voronoi_pair_demo/cache_3dgp.pkl --png
+```
+
+Draws the radical-Voronoi surface two residues share, in the style of
+`examples/voronoi_1acb_demo` but reduced to one pair on a white background:
+atom spheres at the tessellation's own radii, one translucent polygon per
+atom–atom face coloured by area, and the summed area labelled. The label is
+the `voronoi_contact_area` edge feature itself — verified equal to the contact
+table to three decimals.
+
+The tessellation is still run over the **whole protein** (a residue's cell is
+bounded by all its neighbours; two residues in isolation would give the wrong
+area) and cached to a pickle so the figure can be re-drawn for any pair in
+seconds. Default pair is the largest inter-chain contact; `--pair AA_ID1 AA_ID2`
+picks another. `notebooks/voronoi_pair_figure.ipynb` is the interactive version.
+
+This needs the Voronoi stack (pyvoro, trimesh, manifold3d, pyvista), which is
+in `our_env`, not `apbs_env` — pyvoro's compiled extension does not load in the
+APBS environment on this machine.
+
+Two fixes landed while building this: pyvista ≥ 0.44 removed `PolyData.n_faces`,
+which broke `create_surface()` in `bounded_voronoi_contacts_radical.py` while
+every import still succeeded (now `reshape((-1, 4))`); and the cluster preflight
+gained an icosphere → trimesh check so that class of break fails in preflight
+rather than on the first model of an array task.
 
 ## Reading the output
 

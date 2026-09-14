@@ -229,3 +229,74 @@ def prepare_structure(
         atom_count=np.array(atom_counts, dtype=np.int32),
         warnings=warnings,
     )
+
+
+@dataclass
+class ChainSplit:
+    """One chain carved out of a complex, with its link back to the parent."""
+
+    chain: str
+    pdb_path: Path
+    parent_aa_id: np.ndarray   # (R_chain,) this chain's residues as aa_ids of the complex
+    residue_count: int
+
+
+def split_chains(pdb_path: str | Path, output_dir: str | Path, keep_altloc: str = "A") -> list[ChainSplit]:
+    """Write one PDB per chain, recording each residue's aa_id in the complex.
+
+    The residue blocks are found exactly as prepare_structure finds them (same
+    key-change plus repeated-atom-name rule), so a monomer's residue i is the
+    complex's residue parent_aa_id[i] with no name matching involved -- which
+    matters for the files whose insertion codes were dropped, where
+    (chain, number) is not unique.
+
+    Atom lines are copied verbatim; normalisation happens later when
+    prepare_structure runs on each chain file, so a monomer is prepared exactly
+    the way its complex was.
+    """
+    pdb_path = Path(pdb_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    blocks: list[tuple[str, list[str]]] = []   # (chain, lines) in file order
+    previous_key = None
+    block_atom_names: set[str] = set()
+    for line in pdb_path.read_text(errors="replace").splitlines():
+        if not line.startswith("ATOM"):
+            continue
+        if line[16] not in (" ", keep_altloc):
+            continue
+        if _is_hydrogen(line):
+            continue
+        key = (line[21], line[22:26].strip(), line[26].strip(), line[17:20].strip())
+        atom_name = _atom_name(line)
+        if key != previous_key or atom_name in block_atom_names:
+            blocks.append((line[21], []))
+            previous_key = key
+            block_atom_names = set()
+        blocks[-1][1].append(line)
+        block_atom_names.add(atom_name)
+
+    if not blocks:
+        raise ValueError(f"No usable ATOM records in {pdb_path}")
+
+    by_chain: dict[str, list[tuple[int, list[str]]]] = {}
+    for aa_id, (chain, lines) in enumerate(blocks):
+        by_chain.setdefault(chain, []).append((aa_id, lines))
+
+    splits: list[ChainSplit] = []
+    for chain in sorted(by_chain):
+        entries = by_chain[chain]
+        chain_label = chain.strip() or "_"
+        chain_path = output_dir / f"{pdb_path.stem}_chain_{chain_label}.pdb"
+        output_lines = [line for _aa_id, lines in entries for line in lines]
+        chain_path.write_text("\n".join(output_lines) + "\nTER\nEND\n", encoding="utf-8")
+        splits.append(
+            ChainSplit(
+                chain=chain_label,
+                pdb_path=chain_path,
+                parent_aa_id=np.array([aa_id for aa_id, _lines in entries], dtype=np.int32),
+                residue_count=len(entries),
+            )
+        )
+    return splits

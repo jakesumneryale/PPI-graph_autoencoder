@@ -18,6 +18,7 @@ import traceback
 from typing import Iterator, Sequence
 
 import h5py
+import numpy as np
 
 from apbs_analysis.common import ModelInput, model_group_is_complete
 from apbs_analysis.electrostatics import ApbsSettings, compute_surface_electrostatics
@@ -93,16 +94,35 @@ def compute_one(model: ModelInput, options: RunOptions):
     start_time = time.time()
     result = None
     try:
-        result = compute_surface_electrostatics(
-            pdb_path=model.pdb_path,
-            model_id=model.model_id,
-            settings=options.settings,
-            scratch_dir=options.scratch_dir,
-            keep_intermediates_dir=options.intermediates_dir,
-            keep_grid=options.store_grid,
-            keep_surface_points=options.store_surface_points,
-            timeout=options.timeout,
-        )
+        if model.monomer_source is not None:
+            from apbs_analysis.monomer import compute_monomer_electrostatics
+
+            store_path, complex_id, chain = model.monomer_source
+            result = compute_monomer_electrostatics(
+                store_path=store_path,
+                complex_id=complex_id,
+                chain=chain,
+                settings=options.settings,
+                match_complex_grid=model.grid_override is not False,
+                scratch_dir=options.scratch_dir,
+                keep_grid=options.store_grid,
+                keep_surface_points=options.store_surface_points,
+                timeout=options.timeout,
+            )
+        else:
+            result = compute_surface_electrostatics(
+                pdb_path=model.pdb_path,
+                model_id=model.model_id,
+                settings=options.settings,
+                scratch_dir=options.scratch_dir,
+                keep_intermediates_dir=options.intermediates_dir,
+                keep_grid=options.store_grid,
+                keep_surface_points=options.store_surface_points,
+                timeout=options.timeout,
+                grid_override=model.grid_override,
+            )
+        if model.extra_attributes:
+            result.extra_attributes.update(model.extra_attributes)
         row["num_atoms"] = int(len(result.structure))
         row["num_residues"] = int(len(result.residue_number))
         row["num_surface_points"] = (
@@ -110,8 +130,15 @@ def compute_one(model: ModelInput, options: RunOptions):
         )
         row["total_charge"] = round(float(result.structure.charge.sum()), 4)
         row["total_sasa"] = round(float(result.residue_sasa.sum()), 2)
-        surfaced = result.residue_potential_mean[result.residue_surface_point_count > 0]
-        row["mean_surface_potential"] = round(float(surfaced.mean()), 5) if surfaced.size else ""
+        # SASA-weighted over the whole molecule, so this is the actual mean
+        # surface potential -- not an unweighted mean of per-residue means,
+        # which would count a barely-exposed residue the same as a large one.
+        exposed = result.residue_surface_point_count > 0
+        area = result.residue_sasa[exposed]
+        values = result.residue_potential_mean[exposed]
+        row["mean_surface_potential"] = (
+            round(float(np.nansum(values * area) / np.nansum(area)), 5) if area.size else ""
+        )
         if result.warnings:
             row["message"] = "; ".join(result.warnings)
     except Exception as exc:  # noqa: BLE001
@@ -237,7 +264,9 @@ def run_models(
         for row, result in _iter_results(pending, options):
             if result is not None:
                 try:
-                    commit_model_group(handle, str(row["model_id"]), result)
+                    commit_model_group(
+                        handle, str(row["model_id"]), result, extra_attributes=result.extra_attributes
+                    )
                 except Exception as exc:  # noqa: BLE001
                     row["status"] = "error"
                     row["message"] = f"write failed: {type(exc).__name__}: {exc}"[:800]

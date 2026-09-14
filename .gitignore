@@ -9,3 +9,4 @@ apbs_run/
 apbs_env/
 io.mc
 gate_run/node_feature_ablation_lr5e-6/
+apbs_analysis/approach_movie.py

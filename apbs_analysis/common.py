@@ -52,6 +52,7 @@ REQUIRED_MODEL_DATASETS = (
 SURFACE_POINT_DATASETS = (
     "surface_xyz",
     "surface_potential",
+    "surface_point_area",
     "surface_atom_index",
     "surface_residue_index",
 )
@@ -66,7 +67,10 @@ class ModelInput:
     target_name: str
     model_id: str          # HDF5 group name for this model's results
     pdb_path: Path
-    location_type: str     # "sampled" | "random_negative" | "bound_complex"
+    location_type: str     # "sampled" | "random_negative" | "bound_complex" | "monomer"
+    grid_override: object | None = None   # GridParameters, to share a parent's lattice
+    extra_attributes: dict | None = None  # written verbatim onto the model group
+    monomer_source: tuple | None = None   # (store_path, complex_id, chain) for a chain of a solved complex
 
 
 def target_name_from_dir(target_dir: str | Path) -> str:

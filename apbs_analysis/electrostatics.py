@@ -141,10 +141,12 @@ class SurfaceElectrostatics:
     grid_parameters: GridParameters
     surface_xyz: np.ndarray | None = None
     surface_potential: np.ndarray | None = None
+    surface_point_area: np.ndarray | None = None
     surface_atom_index: np.ndarray | None = None
     surface_residue_index: np.ndarray | None = None
     potential_grid: np.ndarray | None = None
     warnings: list[str] = field(default_factory=list)
+    extra_attributes: dict = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
@@ -303,14 +305,31 @@ def write_apbs_input(
     grid: GridParameters,
     settings: ApbsSettings,
     potential_stem: str = "potential",
+    use_explicit_center: bool = False,
 ) -> None:
-    """Emit an APBS mg-auto (focusing) input deck for a single molecule."""
+    """Emit an APBS mg-auto (focusing) input deck for a single molecule.
+
+    use_explicit_center pins the box to grid.center instead of letting APBS
+    centre on the molecule. `cgcent mol 1` centres on the *molecule*, so a
+    monomer would get a different box than its parent complex -- measured at
+    up to 0.1 A, which is enough to misalign voxels and make a complex-minus-
+    monomers difference map meaningless. Pinning the centre is what keeps the
+    two maps on the same lattice.
+    """
     ion_lines = ""
     if settings.ionic_strength > 0:
         ion_lines = (
             f"    ion charge  1 conc {settings.ionic_strength:.4f} radius {settings.ion_radius:.2f}\n"
             f"    ion charge -1 conc {settings.ionic_strength:.4f} radius {settings.ion_radius:.2f}\n"
         )
+
+    if use_explicit_center:
+        centre = (
+            f"    cgcent {grid.center[0]:.4f} {grid.center[1]:.4f} {grid.center[2]:.4f}\n"
+            f"    fgcent {grid.center[0]:.4f} {grid.center[1]:.4f} {grid.center[2]:.4f}\n"
+        )
+    else:
+        centre = "    cgcent mol 1\n    fgcent mol 1\n"
 
     input_path.write_text(
         f"""read
@@ -321,9 +340,7 @@ elec name solvated
     dime   {grid.dime[0]} {grid.dime[1]} {grid.dime[2]}
     cglen  {grid.cglen[0]:.4f} {grid.cglen[1]:.4f} {grid.cglen[2]:.4f}
     fglen  {grid.fglen[0]:.4f} {grid.fglen[1]:.4f} {grid.fglen[2]:.4f}
-    cgcent mol 1
-    fgcent mol 1
-    mol 1
+{centre}    mol 1
     {settings.pbe_solver}
     bcfl sdh
     pdie {settings.protein_dielectric}
@@ -380,10 +397,16 @@ def solvent_accessible_points(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Shrake-Rupley surface sampling.
 
-    Returns (points (P, 3), owning atom index (P,), per-atom SASA (N,)).
-    A test point on atom i survives if it lies outside every other atom's
-    probe-expanded sphere; the surviving fraction times 4*pi*R_i^2 is atom i's
-    solvent-accessible area.
+    Returns (points (P, 3), owning atom index (P,), per-point area (P,),
+    per-atom SASA (N,)). A test point on atom i survives if it lies outside
+    every other atom's probe-expanded sphere; the surviving fraction times
+    4*pi*R_i^2 is atom i's solvent-accessible area.
+
+    The per-point area is 4*pi*(r_i + probe)^2 / sphere_points, which depends
+    on the *owning atom's* radius -- PARSE radii run from 0.0 (aliphatic
+    hydrogen, united into its carbon) to 2.0 A (that united carbon), so points
+    differ in represented area by nearly 6x. Any surface average must weight by
+    this, not treat points as interchangeable.
     """
     from scipy.spatial import cKDTree
 
@@ -417,8 +440,15 @@ def solvent_accessible_points(
         )
 
     if not kept_points:
-        return np.empty((0, 3)), np.empty(0, dtype=np.int32), atom_sasa
-    return np.concatenate(kept_points), np.concatenate(kept_owner), atom_sasa
+        return (
+            np.empty((0, 3)),
+            np.empty(0, dtype=np.int32),
+            np.empty(0, dtype=np.float64),
+            atom_sasa,
+        )
+    owner = np.concatenate(kept_owner)
+    point_area = 4.0 * np.pi * expanded[owner] ** 2 / sphere_points
+    return np.concatenate(kept_points), owner, point_area, atom_sasa
 
 
 # --------------------------------------------------------------------------
@@ -427,18 +457,26 @@ def solvent_accessible_points(
 
 
 def _grouped_statistics(
-    values: np.ndarray, group_index: np.ndarray, group_count: int
+    values: np.ndarray, group_index: np.ndarray, group_count: int, weights: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """mean/min/max/std/count per group; empty groups get NaN statistics."""
-    counts = np.bincount(group_index, minlength=group_count).astype(np.int64)
-    totals = np.bincount(group_index, weights=values, minlength=group_count)
-    squares = np.bincount(group_index, weights=values**2, minlength=group_count)
+    """Area-weighted mean/std, plus min/max/count, per group.
 
-    populated = counts > 0
+    The mean is the surface integral  mean = sum(phi_k * a_k) / sum(a_k),
+    where a_k is the area point k represents. Weighting matters: an unweighted
+    mean over points silently over-counts small-radius atoms, which differs
+    from the true surface average by up to several kT/e on some residues.
+    Empty groups get NaN statistics.
+    """
+    counts = np.bincount(group_index, minlength=group_count).astype(np.int64)
+    areas = np.bincount(group_index, weights=weights, minlength=group_count)
+    totals = np.bincount(group_index, weights=values * weights, minlength=group_count)
+    squares = np.bincount(group_index, weights=(values**2) * weights, minlength=group_count)
+
+    populated = (counts > 0) & (areas > 0)
     means = np.full(group_count, np.nan)
     stds = np.full(group_count, np.nan)
-    means[populated] = totals[populated] / counts[populated]
-    variance = np.maximum(0.0, squares[populated] / counts[populated] - means[populated] ** 2)
+    means[populated] = totals[populated] / areas[populated]
+    variance = np.maximum(0.0, squares[populated] / areas[populated] - means[populated] ** 2)
     stds[populated] = np.sqrt(variance)
 
     # Seed with +/-inf (not NaN) because np.minimum/np.maximum propagate NaN,
@@ -447,8 +485,8 @@ def _grouped_statistics(
     maxima = np.full(group_count, -np.inf)
     np.minimum.at(minima, group_index, values)
     np.maximum.at(maxima, group_index, values)
-    minima = np.where(populated, minima, np.nan)
-    maxima = np.where(populated, maxima, np.nan)
+    minima = np.where(counts > 0, minima, np.nan)
+    maxima = np.where(counts > 0, maxima, np.nan)
 
     return means, minima, maxima, stds, counts
 
@@ -459,12 +497,15 @@ def aggregate_by_residue(
     residue_count: int,
     surface_atom_index: np.ndarray,
     surface_potential: np.ndarray,
+    surface_point_area: np.ndarray,
     atom_sasa: np.ndarray,
 ) -> dict[str, np.ndarray]:
     """Roll atom/point quantities up to residues.
 
-    Surface points are near-equal-area samples, so the plain mean over a
-    residue's points is already an area-weighted mean surface potential.
+    residue_potential_mean is the area-weighted surface average over that
+    residue's solvent-accessible patch, i.e. the discretised
+    integral(phi dA) / integral(dA). The weights sum to the residue's SASA by
+    construction, so residue_sasa and the mean are consistent with each other.
     """
     surface_residue_index = (
         atom_aa_id[surface_atom_index]
@@ -472,7 +513,10 @@ def aggregate_by_residue(
         else np.empty(0, dtype=np.int32)
     )
     means, minima, maxima, stds, counts = _grouped_statistics(
-        surface_potential.astype(np.float64), surface_residue_index, residue_count
+        surface_potential.astype(np.float64),
+        surface_residue_index,
+        residue_count,
+        surface_point_area,
     )
     return {
         "surface_residue_index": surface_residue_index.astype(np.int32),
@@ -500,6 +544,7 @@ def compute_surface_electrostatics(
     keep_grid: bool = False,
     keep_surface_points: bool = False,
     timeout: float | None = None,
+    grid_override: GridParameters | None = None,
 ) -> SurfaceElectrostatics:
     """Full pdb2pqr -> APBS -> surface-projection pipeline for one structure.
 
@@ -543,7 +588,10 @@ def compute_surface_electrostatics(
         # APBS reads this normalised copy, never pdb2pqr's own fixed-width file.
         apbs_pqr_path = write_pqr(structure, work_dir / "apbs_input.pqr")
 
-        grid = compute_grid_parameters(
+        # A grid_override reproduces some other molecule's box exactly (used to
+        # put a monomer on its parent complex's lattice); it must therefore
+        # also pin the centre rather than let APBS re-centre on this molecule.
+        grid = grid_override or compute_grid_parameters(
             structure.xyz,
             structure.radius,
             coarse_factor=settings.coarse_factor,
@@ -552,7 +600,13 @@ def compute_surface_electrostatics(
             memory_ceiling_mb=settings.memory_ceiling_mb,
         )
         input_path = work_dir / "apbs.in"
-        write_apbs_input(input_path, apbs_pqr_path.name, grid, settings)
+        write_apbs_input(
+            input_path,
+            apbs_pqr_path.name,
+            grid,
+            settings,
+            use_explicit_center=grid_override is not None,
+        )
         dx_path = run_apbs(input_path, work_dir, settings, timeout=timeout)
         potential: DxGrid = read_dx(dx_path)
 
@@ -577,7 +631,7 @@ def compute_surface_electrostatics(
             ) as archive:
                 shutil.copyfileobj(source, archive)
 
-    surface_xyz, surface_atom_index, atom_sasa = solvent_accessible_points(
+    surface_xyz, surface_atom_index, surface_point_area, atom_sasa = solvent_accessible_points(
         structure.xyz,
         structure.radius,
         probe_radius=settings.probe_radius,
@@ -596,6 +650,7 @@ def compute_surface_electrostatics(
         residue_count,
         surface_atom_index,
         surface_potential,
+        surface_point_area,
         atom_sasa,
     )
 
@@ -634,6 +689,7 @@ def compute_surface_electrostatics(
         grid_parameters=grid,
         surface_xyz=surface_xyz.astype(np.float32) if keep_surface_points else None,
         surface_potential=surface_potential if keep_surface_points else None,
+        surface_point_area=surface_point_area.astype(np.float32) if keep_surface_points else None,
         surface_atom_index=surface_atom_index if keep_surface_points else None,
         surface_residue_index=aggregates["surface_residue_index"] if keep_surface_points else None,
         potential_grid=potential.values if keep_grid else None,

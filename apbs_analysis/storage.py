@@ -97,6 +97,7 @@ def write_model_group(group: h5py.Group, result: SurfaceElectrostatics) -> None:
     if result.surface_xyz is not None:
         _write_array(group, "surface_xyz", result.surface_xyz, np.float32)
         _write_array(group, "surface_potential", result.surface_potential, np.float32)
+        _write_array(group, "surface_point_area", result.surface_point_area, np.float32)
         _write_array(group, "surface_atom_index", result.surface_atom_index, np.int32)
         _write_array(group, "surface_residue_index", result.surface_residue_index, np.int32)
         group.attrs["num_surface_points"] = int(len(result.surface_xyz))
@@ -111,7 +112,10 @@ def write_model_group(group: h5py.Group, result: SurfaceElectrostatics) -> None:
 
 
 def commit_model_group(
-    handle: h5py.File, model_id: str, result: SurfaceElectrostatics
+    handle: h5py.File,
+    model_id: str,
+    result: SurfaceElectrostatics,
+    extra_attributes: dict | None = None,
 ) -> None:
     """Write to a staging group and rename only once every dataset landed.
 
@@ -124,6 +128,8 @@ def commit_model_group(
     staging_group = handle.create_group(staging_name)
     try:
         write_model_group(staging_group, result)
+        for key, value in (extra_attributes or {}).items():
+            staging_group.attrs[key] = value
         handle.flush()
         if model_id in handle:
             del handle[model_id]

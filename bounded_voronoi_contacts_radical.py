@@ -54,7 +54,10 @@ def create_surface(coords,atomic_radii,probe_size=1.4):
         nsub=2)
 
         ##Turn spheres to trimesh format
-        sphere_as_array = sphere.faces.reshape((sphere.n_faces, 4))[:, 1:] 
+        # -1 rather than sphere.n_faces: pyvista removed the non-strict n_faces
+        # property (>=0.44), and an icosphere is all triangles so the count is
+        # implied by the padded-face layout anyway.
+        sphere_as_array = sphere.faces.reshape((-1, 4))[:, 1:]
         sphere_tmesh=tm.Trimesh(sphere.points, sphere_as_array) 
         multi_spheres.append(sphere_tmesh)
 

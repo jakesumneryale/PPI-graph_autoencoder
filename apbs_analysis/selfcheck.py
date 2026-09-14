@@ -71,27 +71,56 @@ def check_dx_roundtrip() -> None:
     print("  dx round trip: shape, origin, spacing, axis order, gzip, node sampling")
 
 
+def check_area_weighting() -> None:
+    """A surface average must weight points by the area each represents."""
+    from apbs_analysis.electrostatics import _grouped_statistics
+
+    # Two points in one group: one on a big atom, one on a small atom. The
+    # weighted mean must sit nearer the value carried by the larger area.
+    values = np.array([10.0, 0.0])
+    group = np.array([0, 0])
+    areas = np.array([3.0, 1.0])
+    means, minima, maxima, stds, counts = _grouped_statistics(values, group, 1, areas)
+    assert np.isclose(means[0], 7.5), means      # (10*3 + 0*1) / 4, not the unweighted 5.0
+    assert np.isclose(minima[0], 0.0) and np.isclose(maxima[0], 10.0)
+    assert counts[0] == 2
+    # Weighted variance: E[x^2] - E[x]^2 = (100*3)/4 - 7.5^2 = 18.75
+    assert np.isclose(stds[0], np.sqrt(18.75)), stds
+
+    # Equal areas must reproduce the plain mean.
+    equal, *_ = _grouped_statistics(values, group, 1, np.ones(2))
+    assert np.isclose(equal[0], 5.0), equal
+
+    # An empty group stays NaN rather than dividing by zero.
+    empty = _grouped_statistics(np.array([1.0]), np.array([0]), 2, np.array([1.0]))
+    assert np.isnan(empty[0][1]) and np.isnan(empty[1][1]), empty
+    print("  area weighting: weighted mean/std, equal-area fallback, empty groups")
+
+
 def check_surface_sampling() -> None:
     # One isolated atom: its accessible area must be the analytic sphere area.
     radius = 2.0
     probe = 1.4
-    points, owner, sasa = solvent_accessible_points(
+    points, owner, areas, sasa = solvent_accessible_points(
         np.zeros((1, 3)), np.array([radius]), probe_radius=probe, sphere_points=500
     )
     expected = 4.0 * np.pi * (radius + probe) ** 2
     assert abs(sasa[0] - expected) < 1e-6, (sasa[0], expected)
+    # Point areas must sum back to the atom's SASA.
+    assert np.isclose(areas.sum(), sasa[0]), (areas.sum(), sasa[0])
+    assert np.allclose(areas, expected / 500)
     assert len(points) == 500 and set(owner.tolist()) == {0}
     assert np.allclose(np.linalg.norm(points, axis=1), radius + probe)
 
     # A small atom engulfed by a large one is fully buried; the large one is not.
-    _, _, engulfed = solvent_accessible_points(
+    _, _, _, engulfed = solvent_accessible_points(
         np.zeros((2, 3)), np.array([1.0, 5.0]), probe_radius=probe, sphere_points=200
     )
     assert np.isclose(engulfed[0], 0.0), engulfed
     assert engulfed[1] > 0.0, engulfed
 
     # Two nearly coincident atoms lose roughly half their area to each other.
-    _, _, touching = solvent_accessible_points(
+    _, _, _, touching = solvent_accessible_points(
         np.array([[0.0, 0.0, 0.0], [0.2, 0.0, 0.0]]),
         np.array([radius, radius]),
         probe_radius=probe,
@@ -225,6 +254,97 @@ def check_string_storage() -> None:
     print("  string storage: fixed-width columns round-trip via asstr()")
 
 
+def check_screened_coulomb() -> None:
+    """Debye-Huckel energies must match the closed form, and be self-consistent."""
+    from apbs_analysis.approach import (
+        COULOMB_CONSTANT, ScreeningModel, debye_length, pair_potentials,
+    )
+
+    model = ScreeningModel()
+    lam = model.debye_length
+    # Textbook value at 0.150 M / 298.15 K / eps 78.54.
+    assert abs(lam - 7.86) < 0.01, lam
+    # lambda_D scales as 1/sqrt(I).
+    assert abs(debye_length(0.6) - lam / 2.0) < 0.01, (debye_length(0.6), lam)
+
+    # Two unit charges 4 A apart: U = 332.0637 * q1 q2 exp(-r/lam) / (eps r).
+    separation = 4.0
+    a = np.array([[0.0, 0.0, 0.0]])
+    b = np.array([[separation, 0.0, 0.0]])
+    qa, qb = np.array([1.0]), np.array([-1.0])
+    phi_a, phi_b, phi_bare = pair_potentials(a, qa, b, qb, model)
+
+    expected = COULOMB_CONSTANT * 1.0 * -1.0 * np.exp(-separation / lam) / (78.54 * separation)
+    assert np.isclose(float(qa @ phi_a), expected, rtol=1e-10), (qa @ phi_a, expected)
+    # Energy is symmetric: contracting either chain's potential gives the same total.
+    assert np.isclose(float(qa @ phi_a), float(qb @ phi_b), rtol=1e-10), (qa @ phi_a, qb @ phi_b)
+    # Unscreened must equal the screened value divided by the Debye factor.
+    assert np.isclose(float(qa @ phi_bare), expected / np.exp(-separation / lam), rtol=1e-10)
+
+    # Opposite charges attract (negative), like charges repel (positive).
+    _, _, _ = pair_potentials(a, qa, b, np.array([1.0]), model)
+    like = float(qa @ pair_potentials(a, qa, b, np.array([1.0]), model)[0])
+    assert like > 0 and expected < 0, (like, expected)
+
+    # Screening must decay the interaction faster than bare Coulomb.
+    far = np.array([[40.0, 0.0, 0.0]])
+    near_s, _, near_b = pair_potentials(a, qa, b, qb, model)
+    far_s, _, far_b = pair_potentials(a, qa, far, qb, model)
+    screened_ratio = abs(float(qa @ far_s) / float(qa @ near_s))
+    bare_ratio = abs(float(qa @ far_b) / float(qa @ near_b))
+    assert screened_ratio < bare_ratio / 50, (screened_ratio, bare_ratio)
+    print("  screened coulomb: analytic value, symmetry, sign, screening decay")
+
+
+def check_approach_path() -> None:
+    """The walk must end exactly on the bound pose and start far away."""
+    from apbs_analysis.approach import build_path
+
+    rng = np.random.default_rng(0)
+    step = 1.0
+
+    # Two touching-but-not-interpenetrating blobs: a straight pull-out works,
+    # so this exercises the linear branch and its exact arithmetic.
+    fixed = rng.normal(scale=5.0, size=(200, 3))
+    moving = rng.normal(scale=5.0, size=(150, 3)) + np.array([26.0, 0.0, 0.0])
+    path = build_path(fixed, moving, max_displacement=30.0, step=step)
+    assert path.mode == "linear", path.mode
+    assert np.isclose(path.com_displacement[0], 30.0, atol=1e-9), path.com_displacement[0]
+
+    # An interlocked pair, forcing the steered branch.
+    shell = rng.normal(size=(400, 3))
+    shell /= np.linalg.norm(shell, axis=1)[:, None]
+    cage = shell * 14.0                                   # hollow shell
+    core = rng.normal(scale=3.0, size=(120, 3))           # sitting inside it
+    steered = build_path(cage, core, max_displacement=30.0, step=step)
+    assert steered.mode == "steered", steered.mode
+    # A steered path turns as it goes, so it lands within one step of the
+    # requested separation rather than exactly on it -- but never short by more.
+    assert abs(steered.com_displacement[0] - 30.0) <= step, steered.com_displacement[0]
+
+    for name, candidate, bound in (("linear", path, moving), ("steered", steered, core)):
+        assert np.isclose(np.linalg.norm(candidate.axis), 1.0), (name, candidate.axis)
+        # The invariant that actually matters: the last frame is the bound pose
+        # exactly, in both translation and rotation.
+        assert np.allclose(candidate.offset[-1], 0.0), f"{name}: final frame is not the bound pose"
+        assert np.allclose(candidate.rotation[-1], np.eye(3)), f"{name}: final frame is rotated"
+        assert np.allclose(candidate.position(len(candidate.offset) - 1, bound), bound), name
+        assert np.isclose(candidate.com_displacement[-1], 0.0), name
+        # Arc length is monotone by construction on any path. Straight-line
+        # separation from the bound pose is monotone only on a linear path: a
+        # steered one arcs, and the centroid can track back a fraction of an
+        # Angstrom while turning (measured at most 0.35 A over the 84 dimers).
+        # Use path_length as the progress coordinate when that matters.
+        assert np.all(np.diff(candidate.path_length) < 1e-9), f"{name}: arc length not monotone"
+        if name == "linear":
+            assert np.all(np.diff(candidate.com_displacement) < 1e-9), "linear path must be monotone"
+        else:
+            backtrack = np.diff(candidate.com_displacement).max()
+            assert backtrack < 1.0, f"{name}: centroid backtracks {backtrack:.2f} A, too far"
+        assert candidate.min_gap[0] > candidate.min_gap[-1], f"{name}: does not start further apart"
+    print("  approach path: linear and steered branches, exact bound-state endpoint")
+
+
 def check_model_naming() -> None:
     assert model_id_from_pdb_name("complex.0_0_11_corrected_H_0001.pdb") == "complex.0_0_11"
     assert model_id_from_pdb_name("complex.1234_5_corrected_H_0001.pdb") == "complex.1234_5"
@@ -241,10 +361,13 @@ def main() -> None:
     checks = (
         check_grid_sizing,
         check_dx_roundtrip,
+        check_area_weighting,
         check_surface_sampling,
         check_structure_prep,
         check_pqr_parsing,
         check_string_storage,
+        check_screened_coulomb,
+        check_approach_path,
         check_model_naming,
     )
     failures = 0
