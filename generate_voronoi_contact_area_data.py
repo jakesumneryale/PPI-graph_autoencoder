@@ -67,6 +67,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--probe-size", type=float, default=1.4)
     parser.add_argument("--feature-name", default="voronoi_contact_area")
+    parser.add_argument("--missing-mask-name", default="voronoi_contact_missing")
+    parser.add_argument(
+        "--no-missing-mask",
+        action="store_true",
+        help="Write only the contact area when --write-graph-feature is used.",
+    )
     parser.add_argument(
         "--write-graph-feature",
         action="store_true",
@@ -157,12 +163,16 @@ def maybe_write_graph_feature(
     feature_name: str,
     aligned_graph_contact_area: np.ndarray,
     overwrite: bool,
+    missing_mask: np.ndarray | None = None,
+    missing_mask_name: str | None = None,
 ) -> None:
     with h5py.File(graph_hdf5_path, "r+") as graph_handle:
         edge_group = graph_handle[graph_group_name]["edge_features"]
         if feature_name in edge_group and not overwrite:
             return
         _replace_dataset(edge_group, feature_name, aligned_graph_contact_area.astype(np.float32))
+        if missing_mask is not None and missing_mask_name is not None:
+            _replace_dataset(edge_group, missing_mask_name, missing_mask.astype(np.float32))
 
 
 def main() -> None:
@@ -285,6 +295,8 @@ def main() -> None:
                         args.feature_name,
                         aligned_graph_contact_area,
                         overwrite=args.overwrite,
+                        missing_mask=None if args.no_missing_mask else missing_mask,
+                        missing_mask_name=None if args.no_missing_mask else args.missing_mask_name,
                     )
 
                 row["num_nodes"] = int(len(node_table))

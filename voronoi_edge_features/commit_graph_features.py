@@ -27,6 +27,8 @@ import h5py
 import numpy as np
 
 from voronoi_edge_features.common import (
+    DEFAULT_CONTACT_AREA_FEATURE,
+    DEFAULT_MISSING_MASK_FEATURE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_REFERENCE_DIR,
     default_graph_data_path,
@@ -44,7 +46,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", help="Directory containing target graph HDF5 files.")
     parser.add_argument("--reference-dir", default=str(DEFAULT_REFERENCE_DIR))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
-    parser.add_argument("--feature-name", default="voronoi_contact_area")
+    parser.add_argument("--feature-name", default=DEFAULT_CONTACT_AREA_FEATURE)
+    parser.add_argument(
+        "--missing-mask-name",
+        default=DEFAULT_MISSING_MASK_FEATURE,
+        help=(
+            "Edge feature that flags graph edges with no Voronoi face. Without it a zero area "
+            "means both 'these residues barely touch' and 'no data for this pair'."
+        ),
+    )
+    parser.add_argument(
+        "--no-missing-mask",
+        action="store_true",
+        help="Commit only the contact area, reproducing the pre-mask behaviour.",
+    )
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -89,10 +104,13 @@ def main() -> None:
             sys.exit(1)
 
         with h5py.File(graph_hdf5_path, "r") as graph_handle:
+            required_features = [args.feature_name]
+            if not args.no_missing_mask:
+                required_features.append(args.missing_mask_name)
             already_present = {
                 name
                 for name in computed_group_names
-                if args.feature_name in graph_handle[name]["edge_features"]
+                if all(feature in graph_handle[name]["edge_features"] for feature in required_features)
             }
         to_write = computed_group_names if args.overwrite else (computed_group_names - already_present)
 
@@ -111,10 +129,19 @@ def main() -> None:
                 with h5py.File(tmp_path, "r+") as tmp_handle:
                     for name in sorted(to_write):
                         edge_group = tmp_handle[name]["edge_features"]
-                        feature_data = checkpoint_handle[name]["graph_contact_area"][()].astype(np.float32)
-                        if args.feature_name in edge_group:
-                            del edge_group[args.feature_name]
-                        edge_group.create_dataset(args.feature_name, data=feature_data)
+                        datasets = {
+                            args.feature_name: checkpoint_handle[name]["graph_contact_area"][()].astype(np.float32),
+                        }
+                        if not args.no_missing_mask:
+                            # Present on every complete model: the mask is part of
+                            # CHECKPOINT_MODEL_DATASETS, so completeness already guarantees it.
+                            datasets[args.missing_mask_name] = (
+                                checkpoint_handle[name]["graph_contact_missing_mask"][()].astype(np.float32)
+                            )
+                        for feature_name, feature_data in datasets.items():
+                            if feature_name in edge_group:
+                                del edge_group[feature_name]
+                            edge_group.create_dataset(feature_name, data=feature_data)
                     tmp_handle.flush()
                 os.replace(tmp_path, graph_hdf5_path)
             except BaseException:

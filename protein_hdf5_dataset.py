@@ -123,6 +123,86 @@ def _stack_feature_group(group: h5py.Group, feature_names: Sequence[str]) -> np.
     return np.concatenate(arrays, axis=1)
 
 
+EDGE_FEATURE_TRANSFORMS = ("none", "log1p")
+
+
+def compute_edge_feature_stats(
+    paths,
+    feature_names,
+    transforms: dict[str, str],
+    max_graphs: int = 200,
+    seed: int = 7,
+) -> dict[str, tuple[float, float]]:
+    """Mean and std of each named edge feature, after its transform.
+
+    Sampled from the training split only, so the statistics never see validation
+    or test graphs. Returned values are stored in the checkpoint and reused at
+    evaluation time, so a model is always fed the scaling it was trained on.
+    """
+    import random as _random
+
+    rng = _random.Random(seed)
+    accumulated: dict[str, list[np.ndarray]] = {name: [] for name in feature_names}
+    resolved_paths = _resolve_hdf5_paths(paths)
+    graphs_seen = 0
+    for path in resolved_paths:
+        if graphs_seen >= max_graphs:
+            break
+        try:
+            handle = h5py.File(path, "r")
+        except OSError:
+            continue
+        with handle:
+            group_names = sorted(handle.keys())
+            if not group_names:
+                continue
+            take = min(len(group_names), max(1, max_graphs // max(len(resolved_paths), 1)))
+            for group_name in rng.sample(group_names, take):
+                edge_group = handle[group_name].get("edge_features")
+                if edge_group is None:
+                    continue
+                for name in feature_names:
+                    if name not in edge_group:
+                        continue
+                    values = _as_float_matrix(edge_group[name][()])
+                    accumulated[name].append(apply_feature_transform(values, transforms.get(name, "none")))
+                graphs_seen += 1
+                if graphs_seen >= max_graphs:
+                    break
+
+    stats: dict[str, tuple[float, float]] = {}
+    for name, blocks in accumulated.items():
+        if not blocks:
+            continue
+        stacked = np.concatenate(blocks, axis=0)
+        stats[name] = (float(stacked.mean()), float(stacked.std()))
+    return stats
+
+
+def apply_feature_transform(values: np.ndarray, transform: str) -> np.ndarray:
+    """Apply a value transform to one feature block before standardisation.
+
+    ``log1p`` suits heavy-tailed non-negative quantities such as Voronoi contact
+    area: it compresses the tail, keeps 0 mapped to 0, and is monotone, so the
+    ordering the GNN attends to is preserved.
+    """
+    if transform == "none":
+        return values
+    if transform == "log1p":
+        if np.any(values < 0.0):
+            raise ValueError("log1p transform requires non-negative feature values.")
+        return np.log1p(values)
+    raise ValueError(f"Unsupported feature transform {transform!r}; expected one of {EDGE_FEATURE_TRANSFORMS}.")
+
+
+def normalize_feature_block(values: np.ndarray, transform: str, stats: tuple[float, float] | None) -> np.ndarray:
+    transformed = apply_feature_transform(values, transform)
+    if stats is None:
+        return transformed
+    mean, std = stats
+    return (transformed - mean) / max(float(std), 1e-6)
+
+
 def _concatenate_feature_matrices(matrices: Sequence[np.ndarray]) -> np.ndarray:
     non_empty = [matrix for matrix in matrices if matrix.size > 0]
     if not non_empty:
@@ -161,6 +241,8 @@ class ProteinGraphHDF5Dataset(Dataset):
         skip_invalid_files: bool = True,
         optional_node_features_dir: str | Path = DEFAULT_OPTIONAL_NODE_FEATURES_DIR,
         model_list_dir: str | Path | None = None,
+        edge_feature_transforms: dict[str, str] | None = None,
+        edge_feature_stats: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         self.paths = _resolve_hdf5_paths(paths)
         self.node_features = tuple(node_features)
@@ -172,6 +254,19 @@ class ProteinGraphHDF5Dataset(Dataset):
         self.skip_invalid_files = skip_invalid_files
         self.optional_node_features_dir = Path(optional_node_features_dir)
         self.model_list_dir = Path(model_list_dir) if model_list_dir is not None else None
+        self.edge_feature_transforms = dict(edge_feature_transforms or {})
+        self.edge_feature_stats = dict(edge_feature_stats or {})
+        unknown_transform_features = sorted(set(self.edge_feature_transforms) - set(self.edge_features))
+        if unknown_transform_features:
+            raise KeyError(
+                f"Transform requested for edge feature(s) not in use: {unknown_transform_features}"
+            )
+        for feature_name, transform in self.edge_feature_transforms.items():
+            if transform not in EDGE_FEATURE_TRANSFORMS:
+                raise ValueError(
+                    f"Unsupported transform {transform!r} for {feature_name!r}; "
+                    f"expected one of {EDGE_FEATURE_TRANSFORMS}."
+                )
         self.allowed_models = self._load_allowed_models()
         self.hdf5_node_features = tuple(
             feature_name
@@ -353,6 +448,42 @@ class ProteinGraphHDF5Dataset(Dataset):
         data.graph_format = sample.format
         return data
 
+    def _stack_edge_features(self, edge_group: h5py.Group) -> np.ndarray:
+        """Read each edge feature separately so transforms apply to the right columns."""
+        if not self.edge_features:
+            return np.empty((0, 0), dtype=np.float32)
+        missing = [name for name in self.edge_features if name not in edge_group]
+        if missing:
+            available = ", ".join(sorted(edge_group.keys()))
+            raise KeyError(f"Missing feature(s) {missing}; available features: {available}")
+
+        blocks = []
+        for feature_name in self.edge_features:
+            values = _as_float_matrix(edge_group[feature_name][()])
+            transform = self.edge_feature_transforms.get(feature_name, "none")
+            stats = self.edge_feature_stats.get(feature_name)
+            if transform != "none" or stats is not None:
+                values = normalize_feature_block(values, transform, stats).astype(np.float32)
+            blocks.append(values)
+        return np.concatenate(blocks, axis=1)
+
+    def edge_feature_slices(self) -> dict[str, slice]:
+        """Column span of each edge feature inside ``edge_attr``."""
+        slices: dict[str, slice] = {}
+        start = 0
+        for feature_name, width in zip(self.edge_features, self.edge_feature_widths()):
+            slices[feature_name] = slice(start, start + width)
+            start += width
+        return slices
+
+    def edge_feature_widths(self) -> tuple[int, ...]:
+        sample = self.samples[0]
+        with h5py.File(sample.path, "r") as h5:
+            edge_group = h5[sample.group_name]["edge_features"]
+            return tuple(
+                int(_as_float_matrix(edge_group[name][()]).shape[1]) for name in self.edge_features
+            )
+
     def _build_optional_node_feature_matrix(self, sample: HDF5GraphKey, num_nodes: int) -> np.ndarray:
         if not self.optional_node_features:
             return np.empty((num_nodes, 0), dtype=np.float32)
@@ -373,7 +504,7 @@ class ProteinGraphHDF5Dataset(Dataset):
         x_optional = self._build_optional_node_feature_matrix(sample, num_nodes)
         x = _concatenate_feature_matrices((x_hdf5, x_optional))
         contacts = np.asarray(group["edge_features"]["contacts"][()], dtype=np.int64)
-        edge_attr = _stack_feature_group(group["edge_features"], self.edge_features)
+        edge_attr = self._stack_edge_features(group["edge_features"])
 
         if contacts.ndim != 2 or contacts.shape[1] != 2:
             raise ValueError(f"contacts must have shape [num_edges, 2], got {contacts.shape}.")

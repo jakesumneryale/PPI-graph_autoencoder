@@ -44,6 +44,7 @@ EDGE_FEATURE_DIMS = {
     "interface_edges": 1,
     "ca_dist": 1,
     "voronoi_contact_area": 1,
+    "voronoi_contact_missing": 1,
 }
 
 
@@ -331,12 +332,31 @@ def update_feature_metrics(
     pred_nodes: torch.Tensor,
     true_edges: torch.Tensor,
     pred_edges: torch.Tensor,
+    edge_recon_features: tuple[str, ...] | None = None,
+    edge_recon_slices: dict[str, slice] | None = None,
 ) -> None:
+    """Accumulate reconstruction metrics.
+
+    ``true_edges`` is laid out by ``edge_features`` (everything the encoder saw)
+    while ``pred_edges`` is laid out by ``edge_recon_features`` (what the decoder
+    emits). When a feature is input-only the two differ, so each side is indexed
+    with its own slice map and non-reconstructed features are skipped.
+    """
+    if edge_recon_features is None:
+        edge_recon_features = edge_features
+    if edge_recon_slices is None:
+        edge_recon_slices = edge_feature_slices
+
     accumulator["node_sq_error_sum"] += float(torch.sum((pred_nodes - true_nodes) ** 2).item())
     accumulator["node_value_count"] += float(true_nodes.numel())
-    if true_edges.numel() > 0:
-        accumulator["edge_sq_error_sum"] += float(torch.sum((pred_edges - true_edges) ** 2).item())
-        accumulator["edge_value_count"] += float(true_edges.numel())
+    if true_edges.numel() > 0 and pred_edges.numel() > 0:
+        reconstructed_truth = torch.cat(
+            [true_edges[:, edge_feature_slices[name]] for name in edge_recon_features], dim=1
+        )
+        accumulator["edge_sq_error_sum"] += float(
+            torch.sum((pred_edges - reconstructed_truth) ** 2).item()
+        )
+        accumulator["edge_value_count"] += float(reconstructed_truth.numel())
 
     if "aa_type" in node_features:
         aa_slice = node_feature_slices["aa_type"]
@@ -372,18 +392,19 @@ def update_feature_metrics(
             accumulator[f"{feature_name}_signed_error_sum"] += float(torch.sum(feature_error).item())
             accumulator[f"{feature_name}_total"] += float(feature_error.numel())
 
-    if "interface_edges" in edge_features and true_edges.numel() > 0:
-        interface_edge_slice = edge_feature_slices["interface_edges"]
+    if "interface_edges" in edge_recon_features and true_edges.numel() > 0:
         update_binary_metric(
             accumulator,
-            true_edges[:, interface_edge_slice].view(-1),
-            pred_edges[:, interface_edge_slice].view(-1),
+            true_edges[:, edge_feature_slices["interface_edges"]].view(-1),
+            pred_edges[:, edge_recon_slices["interface_edges"]].view(-1),
             "interface_edge",
         )
 
-    if "ca_dist" in edge_features and true_edges.numel() > 0:
-        ca_dist_slice = edge_feature_slices["ca_dist"]
-        distance_error = pred_edges[:, ca_dist_slice].view(-1) - true_edges[:, ca_dist_slice].view(-1)
+    if "ca_dist" in edge_recon_features and true_edges.numel() > 0:
+        distance_error = (
+            pred_edges[:, edge_recon_slices["ca_dist"]].view(-1)
+            - true_edges[:, edge_feature_slices["ca_dist"]].view(-1)
+        )
         accumulator["ca_dist_abs_error_sum"] += float(torch.sum(torch.abs(distance_error)).item())
         accumulator["ca_dist_sq_error_sum"] += float(torch.sum(distance_error**2).item())
         accumulator["ca_dist_signed_error_sum"] += float(torch.sum(distance_error).item())
@@ -505,6 +526,12 @@ def evaluate_checkpoint(
     checkpoint_args = checkpoint.get("args", {})
     node_features = tuple(checkpoint["node_features"])
     edge_features = tuple(checkpoint["edge_features"])
+    # Older checkpoints predate input-only edge features and feature transforms.
+    edge_recon_features = tuple(checkpoint.get("edge_recon_features") or edge_features)
+    edge_feature_transforms = dict(checkpoint.get("edge_feature_transforms") or {})
+    edge_feature_stats = {
+        name: tuple(value) for name, value in (checkpoint.get("edge_feature_stats") or {}).items()
+    }
     test_paths = resolve_test_paths(checkpoint, args.split_manifest)
 
     dataset = ProteinGraphHDF5Dataset(
@@ -517,6 +544,8 @@ def evaluate_checkpoint(
         skip_invalid_files=not args.strict_hdf5,
         optional_node_features_dir=checkpoint_args.get("optional_node_features_dir", args.optional_node_features_dir),
         model_list_dir=checkpoint_args.get("model_list_dir", args.model_list_dir),
+        edge_feature_transforms=edge_feature_transforms,
+        edge_feature_stats=edge_feature_stats,
     )
     print(
         "Building evaluation dataloader with "
@@ -534,12 +563,21 @@ def evaluate_checkpoint(
         dropout=checkpoint_args["dropout"],
         residual_connections=checkpoint_args.get("residual_connections", False),
         predict_target=True,
+        out_edge_feats=sum(EDGE_FEATURE_DIMS[name] for name in edge_recon_features),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
+    if edge_recon_features != edge_features:
+        model.set_edge_recon_index(checkpoint["edge_recon_columns"])
     model.eval()
 
     node_feature_slices = build_feature_slices(node_features, NODE_FEATURE_DIMS)
     edge_feature_slices = build_feature_slices(edge_features, EDGE_FEATURE_DIMS)
+    edge_recon_slices = build_feature_slices(edge_recon_features, EDGE_FEATURE_DIMS)
+    if edge_recon_features != edge_features:
+        input_only = [name for name in edge_features if name not in edge_recon_features]
+        print(f"  reconstructed edge features: {edge_recon_features} (input-only: {input_only})")
+    if edge_feature_transforms or edge_feature_stats:
+        print(f"  edge transforms: {edge_feature_transforms or '{}'}  stats: {edge_feature_stats or '{}'}")
     global_metrics = make_metric_accumulator()
     metrics_by_target: dict[str, dict[str, float]] = {}
     rng = np.random.default_rng(args.seed)
@@ -620,6 +658,8 @@ def evaluate_checkpoint(
                         pred_nodes=local_node_recon,
                         true_edges=unique_edge_attr if unique_edge_attr is not None else local_nodes.new_empty((0, 0)),
                         pred_edges=unique_edge_recon if unique_edge_recon is not None else local_nodes.new_empty((0, 0)),
+                        edge_recon_features=edge_recon_features,
+                        edge_recon_slices=edge_recon_slices,
                     )
                     update_edge_classification_metrics(
                         accumulator,
@@ -639,6 +679,7 @@ def evaluate_checkpoint(
     summary_row["checkpoint"] = str(checkpoint_path)
     summary_row["node_features"] = ",".join(node_features)
     summary_row["edge_features"] = ",".join(edge_features)
+    summary_row["edge_recon_features"] = ",".join(edge_recon_features)
     summary_row["test_hdf5_files"] = len(test_paths)
     summary_row["skipped_hdf5_files"] = len(dataset.skipped_files)
 

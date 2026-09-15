@@ -16,6 +16,9 @@ DEFAULT_GRAPH_DATA_DIR = Path("/scratch/ppi_autoencoder_code/processed_graph_dat
 CLUSTER_GRAPH_DATA_DIR = Path("/home/jas485/project_pi_co54/jas485/ppi_processed_graphs")
 GRAPH_DATA_ENV_VAR = "PPI_HDF5_DATA"
 
+DEFAULT_CONTACT_AREA_FEATURE = "voronoi_contact_area"
+DEFAULT_MISSING_MASK_FEATURE = "voronoi_contact_missing"
+
 CHECKPOINT_MODEL_DATASETS = (
     "node_aa_id",
     "node_aa_ind",

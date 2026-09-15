@@ -27,6 +27,7 @@ class GraphAttentionAutoencoder(nn.Module):
         predict_target: bool = True,
         residual_connections: bool = False,
         num_gat_layers: int | None = None,
+        out_edge_feats: int | None = None,
     ) -> None:
         super().__init__()
         if in_node_feats <= 0:
@@ -42,6 +43,17 @@ class GraphAttentionAutoencoder(nn.Module):
 
         self.in_node_feats = in_node_feats
         self.in_edge_feats = in_edge_feats
+        # Edge features can be encoder inputs without being reconstruction targets:
+        # Voronoi contact area informs attention, but regressing it back dominated
+        # the loss, so out_edge_feats may be narrower than in_edge_feats.
+        self.out_edge_feats = in_edge_feats if out_edge_feats is None else out_edge_feats
+        if self.out_edge_feats < 0:
+            raise ValueError("out_edge_feats cannot be negative.")
+        if self.out_edge_feats > in_edge_feats:
+            raise ValueError("out_edge_feats cannot exceed in_edge_feats.")
+        # Non-persistent: keeps state_dict compatible with checkpoints trained
+        # before input-only edge features existed.
+        self.register_buffer("edge_recon_index", None, persistent=False)
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
         self.dropout = dropout
@@ -93,7 +105,7 @@ class GraphAttentionAutoencoder(nn.Module):
             nn.Linear(2 * latent_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, in_edge_feats),
+            nn.Linear(hidden_dim, self.out_edge_feats),
         )
         self.link_decoder = nn.Sequential(
             nn.Linear(4 * latent_dim, hidden_dim),
@@ -117,6 +129,27 @@ class GraphAttentionAutoencoder(nn.Module):
             if predict_target
             else None
         )
+
+    def set_edge_recon_index(self, column_indices) -> None:
+        """Select which ``edge_attr`` columns the decoder is trained to reproduce.
+
+        Pass ``None`` to reconstruct every input column (the default).
+        """
+        if column_indices is None:
+            self.edge_recon_index = None
+            return
+        index = torch.as_tensor(column_indices, dtype=torch.long)
+        if index.numel() != self.out_edge_feats:
+            raise ValueError(
+                f"edge_recon_index has {index.numel()} entries but out_edge_feats is {self.out_edge_feats}."
+            )
+        self.edge_recon_index = index
+
+    def select_edge_recon_targets(self, edge_attr: torch.Tensor) -> torch.Tensor:
+        """Reduce ground-truth ``edge_attr`` to the reconstructed columns."""
+        if self.edge_recon_index is None:
+            return edge_attr
+        return edge_attr.index_select(1, self.edge_recon_index.to(edge_attr.device))
 
     def encode(self, data):
         """Encode a PyG ``Data`` or ``Batch`` object.
@@ -163,7 +196,7 @@ class GraphAttentionAutoencoder(nn.Module):
 
     def decode_edge_features(self, node_z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """Reconstruct edge attributes for the provided edge list."""
-        if self.in_edge_feats == 0:
+        if self.out_edge_feats == 0:
             return node_z.new_empty((edge_index.size(1), 0))
         src, dst = edge_index
         edge_inputs = torch.cat([node_z[src], node_z[dst]], dim=-1)

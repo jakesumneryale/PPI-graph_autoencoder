@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 import random
 from types import SimpleNamespace
@@ -27,14 +28,54 @@ from protein_hdf5_dataset import (
     HDF5GraphKey,
     ProteinGraphHDF5Dataset,
     apply_cluster_path_defaults,
+    compute_edge_feature_stats,
 )
 
 
 LOSS_METRIC_NAMES = ("loss", "node_mse", "edge_attr_mse", "edge_presence_bce", "target_mse")
+LOSS_TERM_NAMES = ("node_mse", "edge_attr_mse", "edge_presence_bce", "target_mse")
 NODE_FEATURE_SET_CHOICES = {
     "all": DEFAULT_NODE_FEATURES,
     "no-aa-identity": ("chain", "interface_nodes"),
 }
+
+
+def parse_feature_transforms(raw: str | None) -> dict[str, str]:
+    """Parse ``--edge-feature-transforms`` (``NAME=TRANSFORM,...``)."""
+    if not raw:
+        return {}
+    transforms: dict[str, str] = {}
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(f"Expected NAME=TRANSFORM in --edge-feature-transforms, got {item!r}.")
+        name, transform = item.split("=", 1)
+        transforms[name.strip()] = transform.strip()
+    return transforms
+
+
+def resolve_edge_recon_features(args, edge_features: tuple[str, ...]) -> tuple[str, ...]:
+    if args.edge_recon_features is None:
+        return edge_features
+    requested = tuple(item.strip() for item in args.edge_recon_features.split(",") if item.strip())
+    unknown = [name for name in requested if name not in edge_features]
+    if unknown:
+        raise ValueError(
+            f"--edge-recon-features contains feature(s) not in --edge-features: {unknown}"
+        )
+    return requested
+
+
+def edge_recon_column_indices(
+    edge_feature_slices: dict[str, slice], edge_recon_features: tuple[str, ...]
+) -> list[int]:
+    columns: list[int] = []
+    for name in edge_recon_features:
+        span = edge_feature_slices[name]
+        columns.extend(range(span.start, span.stop))
+    return columns
 
 
 def parse_feature_list(raw: str | None, defaults: tuple[str, ...]) -> tuple[str, ...]:
@@ -224,6 +265,8 @@ def make_history_fieldnames() -> list[str]:
     fieldnames = ["epoch"]
     for split_name in ("train", "val", "test"):
         fieldnames.extend(f"{split_name}_{metric_name}" for metric_name in LOSS_METRIC_NAMES)
+    fieldnames.extend(f"weight_{term_name}" for term_name in LOSS_TERM_NAMES)
+    fieldnames.extend(f"train_weighted_{term_name}" for term_name in LOSS_TERM_NAMES)
     return fieldnames
 
 
@@ -232,6 +275,10 @@ def flatten_history_row(epoch: int, metrics_by_split: dict[str, dict[str, float]
     for split_name, metrics in metrics_by_split.items():
         for metric_name in LOSS_METRIC_NAMES:
             row[f"{split_name}_{metric_name}"] = metrics.get(metric_name, 0.0)
+    train_metrics = metrics_by_split.get("train", {})
+    for term_name in LOSS_TERM_NAMES:
+        row[f"weight_{term_name}"] = train_metrics.get(f"weight_{term_name}", 0.0)
+        row[f"train_weighted_{term_name}"] = train_metrics.get(f"weighted_{term_name}", 0.0)
     return row
 
 
@@ -311,13 +358,105 @@ def sample_negative_edges(batch, num_neg_samples: int) -> torch.Tensor:
     )
 
 
-def compute_gate_loss(model, batch, output, args) -> tuple[torch.Tensor, dict[str, float]]:
+class LossShareBalancer:
+    """Turn requested loss *shares* into per-term weights.
+
+    The four GATE terms differ by orders of magnitude: edge-attribute MSE is
+    computed on raw Angstrom-scale features (~2 without Voronoi area, ~10-35 with
+    it) while DockQ MSE sits around 0.08.  Using the shares directly as weights
+    therefore does not produce those shares -- a 0.60 weight on a 0.08 term still
+    loses to a 0.15 weight on a 10.0 term by more than an order of magnitude.
+
+    Each term is divided by a running (bias-corrected EMA) estimate of its own
+    magnitude before the share is applied, so the requested share is the fraction
+    of the total loss, and therefore of the gradient signal, that the term
+    actually contributes.  Statistics are only updated on training batches.
+    """
+
+    def __init__(self, shares: dict[str, float], momentum: float = 0.99, eps: float = 1e-8) -> None:
+        total = sum(shares.values())
+        if total <= 0.0:
+            raise ValueError("Loss shares must sum to a positive value.")
+        if any(value < 0.0 for value in shares.values()):
+            raise ValueError("Loss shares must be non-negative.")
+        self.shares = {name: value / total for name, value in shares.items()}
+        self.momentum = momentum
+        self.eps = eps
+        self._ema = {name: 0.0 for name in self.shares}
+        self._steps = 0
+
+    def observe(self, losses: dict[str, torch.Tensor]) -> None:
+        self._steps += 1
+        for name in self.shares:
+            magnitude = abs(float(losses[name].detach()))
+            self._ema[name] = self.momentum * self._ema[name] + (1.0 - self.momentum) * magnitude
+
+    def weights(self) -> dict[str, float]:
+        if self._steps == 0:
+            return dict(self.shares)
+        correction = 1.0 - self.momentum ** self._steps
+        return {
+            name: share / max(self._ema[name] / correction, self.eps)
+            for name, share in self.shares.items()
+        }
+
+
+def build_lr_scheduler(optimizer, args, steps_per_epoch: int):
+    """Optional linear warmup into cosine decay.
+
+    Returns ``None`` for ``--lr-schedule constant``, which is the default and
+    reproduces the original fixed-rate behaviour.
+    """
+    if args.lr_schedule == "constant":
+        return None
+    total_steps = max(steps_per_epoch * args.epochs, 1)
+    warmup_steps = min(max(args.warmup_steps, 0), total_steps - 1)
+    final_fraction = args.lr_final_fraction
+
+    def lr_lambda(step: int) -> float:
+        if warmup_steps > 0 and step < warmup_steps:
+            return (step + 1) / warmup_steps
+        progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
+        progress = min(max(progress, 0.0), 1.0)
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return final_fraction + (1.0 - final_fraction) * cosine
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+def resolve_loss_weights(args) -> dict[str, float]:
+    return {
+        "node_mse": args.node_weight,
+        "edge_attr_mse": args.edge_attr_weight,
+        "edge_presence_bce": args.edge_presence_weight,
+        "target_mse": args.target_weight,
+    }
+
+
+def build_loss_balancer(args) -> "LossShareBalancer | None":
+    if args.loss_weight_mode != "shares":
+        return None
+    shares = {
+        "node_mse": args.node_share,
+        "edge_attr_mse": args.edge_attr_share,
+        "edge_presence_bce": args.edge_presence_share,
+        "target_mse": args.target_share,
+    }
+    return LossShareBalancer(shares, momentum=args.loss_share_momentum)
+
+
+def compute_gate_loss(model, batch, output, args, balancer=None, update_balancer: bool = False) -> tuple[torch.Tensor, dict[str, float]]:
     losses: dict[str, torch.Tensor] = {}
 
     losses["node_mse"] = F.mse_loss(output["node_recon"], batch.x.float())
 
-    if getattr(batch, "edge_attr", None) is not None and batch.edge_attr.numel() > 0:
-        losses["edge_attr_mse"] = F.mse_loss(output["edge_recon"], batch.edge_attr.float())
+    if (
+        getattr(batch, "edge_attr", None) is not None
+        and batch.edge_attr.numel() > 0
+        and output["edge_recon"].size(1) > 0
+    ):
+        edge_targets = model.select_edge_recon_targets(batch.edge_attr.float())
+        losses["edge_attr_mse"] = F.mse_loss(output["edge_recon"], edge_targets)
     else:
         losses["edge_attr_mse"] = output["node_recon"].new_tensor(0.0)
 
@@ -339,18 +478,26 @@ def compute_gate_loss(model, batch, output, args) -> tuple[torch.Tensor, dict[st
     else:
         losses["target_mse"] = output["node_recon"].new_tensor(0.0)
 
-    total = (
-        args.node_weight * losses["node_mse"]
-        + args.edge_attr_weight * losses["edge_attr_mse"]
-        + args.edge_presence_weight * losses["edge_presence_bce"]
-        + args.target_weight * losses["target_mse"]
+    if balancer is not None:
+        if update_balancer:
+            balancer.observe(losses)
+        weights = balancer.weights()
+    else:
+        weights = resolve_loss_weights(args)
+
+    total = sum(
+        (weights[name] * losses[name] for name in LOSS_TERM_NAMES),
+        start=output["node_recon"].new_tensor(0.0),
     )
     metrics = {name: float(value.detach().cpu()) for name, value in losses.items()}
     metrics["loss"] = float(total.detach().cpu())
+    for name in LOSS_TERM_NAMES:
+        metrics[f"weight_{name}"] = weights[name]
+        metrics[f"weighted_{name}"] = weights[name] * metrics[name]
     return total, metrics
 
 
-def run_epoch(model, loader, optimizer, device, args, train: bool) -> dict[str, float]:
+def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None, scheduler=None) -> dict[str, float]:
     model.train(train)
     totals: dict[str, float] = {}
     num_batches = 0
@@ -362,11 +509,15 @@ def run_epoch(model, loader, optimizer, device, args, train: bool) -> dict[str, 
 
         with torch.set_grad_enabled(train):
             output = model(batch)
-            loss, metrics = compute_gate_loss(model, batch, output, args)
+            loss, metrics = compute_gate_loss(
+                model, batch, output, args, balancer=balancer, update_balancer=train
+            )
             if train:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
 
         for name, value in metrics.items():
             totals[name] = totals.get(name, 0.0) + value
@@ -423,6 +574,14 @@ def main() -> None:
     )
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("constant", "cosine"),
+        default="constant",
+        help="'cosine' applies linear warmup then cosine decay to --lr-final-fraction of --lr.",
+    )
+    parser.add_argument("--warmup-steps", type=int, default=1000)
+    parser.add_argument("--lr-final-fraction", type=float, default=0.03)
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--latent-dim", type=int, default=32)
     parser.add_argument("--gat-heads", type=int, default=4)
@@ -448,10 +607,91 @@ def main() -> None:
         default=None,
         help="Optional JSON split manifest. If it exists, reuse that exact train/val/test target split.",
     )
+    parser.add_argument(
+        "--prepare-splits-only",
+        action="store_true",
+        help=(
+            "Write the split manifest and exit without training. Run this once before dispatching "
+            "seed replicates so they share one split instead of racing to create their own."
+        ),
+    )
+    parser.add_argument(
+        "--edge-recon-features",
+        default=None,
+        help=(
+            "Comma-separated subset of --edge-features that the decoder is trained to reconstruct. "
+            "Defaults to all of them. Features left out are still encoder inputs (they inform "
+            "attention) but are not regression targets -- use this for voronoi_contact_area, whose "
+            "raw-scale reconstruction otherwise takes over the loss."
+        ),
+    )
+    parser.add_argument(
+        "--edge-feature-transforms",
+        default=None,
+        help=(
+            "Comma-separated NAME=TRANSFORM pairs applied to edge features on load, "
+            "e.g. 'voronoi_contact_area=log1p'. Supported transforms: none, log1p."
+        ),
+    )
+    parser.add_argument(
+        "--standardize-edge-features",
+        default=None,
+        help=(
+            "Comma-separated edge features to z-score after their transform, using statistics "
+            "computed from the training split only. Leave features whose reconstruction metrics "
+            "are reported in physical units (ca_dist) out of this list."
+        ),
+    )
+    parser.add_argument(
+        "--edge-stats-seed",
+        type=int,
+        default=None,
+        help=(
+            "Seed for sampling graphs when estimating edge-feature statistics. Defaults to --seed. "
+            "Fix it across seed replicates so every run normalises inputs identically."
+        ),
+    )
+    parser.add_argument(
+        "--edge-stats-max-graphs",
+        type=int,
+        default=200,
+        help="Number of training graphs sampled when estimating edge-feature statistics.",
+    )
+    parser.add_argument(
+        "--loss-weight-mode",
+        choices=("fixed", "shares"),
+        default="fixed",
+        help=(
+            "'fixed' multiplies each raw loss term by its --*-weight. "
+            "'shares' instead normalises every term by a running estimate of its own "
+            "magnitude and then applies --*-share, so each term contributes that "
+            "fraction of the total loss regardless of its natural scale."
+        ),
+    )
     parser.add_argument("--node-weight", type=float, default=1.0)
     parser.add_argument("--edge-attr-weight", type=float, default=1.0)
     parser.add_argument("--edge-presence-weight", type=float, default=0.1)
     parser.add_argument("--target-weight", type=float, default=1.0)
+    parser.add_argument("--node-share", type=float, default=0.15)
+    parser.add_argument("--edge-attr-share", type=float, default=0.15)
+    parser.add_argument("--edge-presence-share", type=float, default=0.10)
+    parser.add_argument("--target-share", type=float, default=0.60)
+    parser.add_argument(
+        "--loss-share-momentum",
+        type=float,
+        default=0.99,
+        help="EMA momentum for the per-term magnitude estimates used by --loss-weight-mode shares.",
+    )
+    parser.add_argument(
+        "--checkpoint-metric",
+        choices=LOSS_METRIC_NAMES,
+        default="loss",
+        help=(
+            "Validation metric used to pick the saved checkpoint. The default total 'loss' is "
+            "dominated by edge-attribute reconstruction; use 'target_mse' to keep the epoch that "
+            "actually predicts DockQ best."
+        ),
+    )
     parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--eval-edge-threshold", type=float, default=0.5)
     parser.add_argument("--eval-negative-ratio", type=float, default=1.0)
@@ -473,6 +713,7 @@ def main() -> None:
 
     print("Indexing dataset...")
 
+    edge_feature_transforms = parse_feature_transforms(args.edge_feature_transforms)
     dataset = ProteinGraphHDF5Dataset(
         args.data,
         node_features=node_features,
@@ -483,9 +724,15 @@ def main() -> None:
         skip_invalid_files=not args.strict_hdf5,
         optional_node_features_dir=args.optional_node_features_dir,
         model_list_dir=args.model_list_dir,
+        edge_feature_transforms=edge_feature_transforms,
     )
     print("Dataset indexed.")
     first_graph = dataset[0]
+
+    edge_feature_slices = dataset.edge_feature_slices()
+    edge_recon_features = resolve_edge_recon_features(args, edge_features)
+    recon_columns = edge_recon_column_indices(edge_feature_slices, edge_recon_features)
+
     model = GraphAttentionAutoencoder(
         in_node_feats=first_graph.x.size(1),
         in_edge_feats=first_graph.edge_attr.size(1),
@@ -495,7 +742,12 @@ def main() -> None:
         dropout=args.dropout,
         residual_connections=args.residual_connections,
         predict_target=True,
+        out_edge_feats=len(recon_columns),
     ).to(device)
+    if edge_recon_features != edge_features:
+        model.set_edge_recon_index(recon_columns)
+        skipped = [name for name in edge_features if name not in edge_recon_features]
+        print(f"Edge features reconstructed: {edge_recon_features} (input-only: {tuple(skipped)})")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -519,6 +771,42 @@ def main() -> None:
         save_target_split_manifest(split_manifest_path, split_paths, split_indices, dataset.samples, args)
         split_manifest_status = "saved"
 
+    if args.prepare_splits_only:
+        counts = {name: len(paths) for name, paths in split_paths.items()}
+        print(
+            f"Split manifest {split_manifest_status}: {split_manifest_path}\n"
+            f"Targets: train={counts['train']}, val={counts['val']}, test={counts['test']}\n"
+            f"Samples: train={len(split_indices['train'])}, val={len(split_indices['val'])}, "
+            f"test={len(split_indices['test'])}\n"
+            "Exiting before training (--prepare-splits-only)."
+        )
+        return
+
+    standardize_features = tuple(
+        item.strip() for item in (args.standardize_edge_features or "").split(",") if item.strip()
+    )
+    unknown_standardize = [name for name in standardize_features if name not in edge_features]
+    if unknown_standardize:
+        raise ValueError(
+            f"--standardize-edge-features contains feature(s) not in --edge-features: {unknown_standardize}"
+        )
+    edge_feature_stats: dict[str, tuple[float, float]] = {}
+    if standardize_features:
+        print(f"Estimating edge-feature statistics from the training split ({len(split_paths['train'])} targets)...")
+        edge_feature_stats = compute_edge_feature_stats(
+            split_paths["train"],
+            standardize_features,
+            edge_feature_transforms,
+            max_graphs=args.edge_stats_max_graphs,
+            seed=args.seed if args.edge_stats_seed is None else args.edge_stats_seed,
+        )
+        # Applied in place: the single dataset object is shared by all three
+        # Subsets, and the dataloaders below have not been built yet.
+        dataset.edge_feature_stats = edge_feature_stats
+        for name, (mean, std) in sorted(edge_feature_stats.items()):
+            transform = edge_feature_transforms.get(name, "none")
+            print(f"  {name}: transform={transform} mean={mean:.4f} std={std:.4f}")
+
     train_dataset = torch.utils.data.Subset(dataset, split_indices["train"])
     val_dataset = torch.utils.data.Subset(dataset, split_indices["val"])
     test_dataset = torch.utils.data.Subset(dataset, split_indices["test"])
@@ -534,6 +822,14 @@ def main() -> None:
     print("Dataloaders ready.")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = build_lr_scheduler(optimizer, args, steps_per_epoch=len(train_loader))
+    if scheduler is None:
+        print(f"Learning rate: {args.lr:g} (constant)")
+    else:
+        print(
+            f"Learning rate: {args.lr:g} with {args.warmup_steps}-step warmup then cosine decay "
+            f"to {args.lr * args.lr_final_fraction:g} over {len(train_loader) * args.epochs} steps"
+        )
 
     train_summary = summarize_split(split_indices["train"], dataset.samples)
     val_summary = summarize_split(split_indices["val"], dataset.samples)
@@ -561,17 +857,28 @@ def main() -> None:
     print(f"Test predictions: {test_predictions_path}")
     print(f"Reconstruction summary: {reconstruction_summary_path}")
 
-    best_val_loss = float("inf")
+    balancer = build_loss_balancer(args)
+    if balancer is not None:
+        share_text = ", ".join(f"{name}={share:.0%}" for name, share in balancer.shares.items())
+        print(f"Loss weighting: normalised shares ({share_text})")
+    else:
+        weight_text = ", ".join(f"{name}={value:g}" for name, value in resolve_loss_weights(args).items())
+        print(f"Loss weighting: fixed weights ({weight_text})")
+    print(f"Checkpoint selected on: val_{args.checkpoint_metric}")
+
+    best_val_metric = float("inf")
     with history_path.open("w", newline="", encoding="ascii") as history_file:
         writer = csv.DictWriter(history_file, fieldnames=make_history_fieldnames())
         writer.writeheader()
 
         for epoch in range(1, args.epochs + 1):
             print(f"Starting epoch {epoch:03d}...")
-            train_metrics = run_epoch(model, train_loader, optimizer, device, args, train=True)
+            train_metrics = run_epoch(
+                model, train_loader, optimizer, device, args, train=True, balancer=balancer, scheduler=scheduler
+            )
             with torch.no_grad():
-                val_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False)
-                test_metrics = run_epoch(model, test_loader, optimizer, device, args, train=False)
+                val_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer)
+                test_metrics = run_epoch(model, test_loader, optimizer, device, args, train=False, balancer=balancer)
 
             writer.writerow(
                 flatten_history_row(
@@ -585,16 +892,17 @@ def main() -> None:
             )
             history_file.flush()
 
-            current_val_loss = val_metrics["loss"]
+            current_val_metric = val_metrics[args.checkpoint_metric]
             message = (
                 f"Epoch {epoch:03d} "
                 f"train loss={train_metrics['loss']:.5f} "
                 f"val loss={val_metrics['loss']:.5f} "
-                f"test loss={test_metrics['loss']:.5f}"
+                f"test loss={test_metrics['loss']:.5f} "
+                f"val target_mse={val_metrics['target_mse']:.5f}"
             )
 
-            if current_val_loss < best_val_loss:
-                best_val_loss = current_val_loss
+            if current_val_metric < best_val_metric:
+                best_val_metric = current_val_metric
                 torch.save(
                     {
                         "model_state_dict": model.state_dict(),
@@ -602,9 +910,15 @@ def main() -> None:
                         "node_features": dataset.node_features,
                         "node_feature_set": args.node_feature_set,
                         "edge_features": dataset.edge_features,
+                        "edge_recon_features": edge_recon_features,
+                        "edge_recon_columns": recon_columns,
+                        "edge_feature_transforms": edge_feature_transforms,
+                        "edge_feature_stats": edge_feature_stats,
                         "in_node_feats": first_graph.x.size(1),
                         "in_edge_feats": first_graph.edge_attr.size(1),
-                        "best_loss": best_val_loss,
+                        "best_loss": best_val_metric,
+                        "best_metric": args.checkpoint_metric,
+                        "best_metric_value": best_val_metric,
                         "best_epoch": epoch,
                         "target_splits": {
                             split_name: [str(path) for path in paths]
