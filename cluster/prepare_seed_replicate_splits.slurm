@@ -7,7 +7,8 @@
 #SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.out
 #SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.err
 
-# Writes ONE train/val/test target split that every seed replicate then reuses.
+# Verifies the committed edge features, then writes ONE train/val/test target
+# split that all six runs reuse.
 #
 # This has to happen before the array starts. --seed drives both model
 # initialisation and the split, so three replicates left to create their own
@@ -19,6 +20,7 @@ set -euo pipefail
 PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 DATA_DIR="${DATA_DIR:-/home/jas485/project_pi_co54/jas485/ppi_processed_graphs}"
 MODEL_LIST_DIR="${MODEL_LIST_DIR:-$PROJECT_DIR/voronoi_dataset_audit/successful_models}"
+GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$PROJECT_DIR/gate_run/seed_replicates}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-$OUTPUT_ROOT/shared_target_splits.json}"
 
@@ -36,6 +38,14 @@ source "$PROJECT_DIR/venv/bin/activate"
 cd "$PROJECT_DIR"
 
 mkdir -p "$OUTPUT_ROOT"
+
+
+echo "=== Preflight: every graph must carry the edge features both configs need ==="
+python verify_edge_features.py \
+  --data "$GRAPH_DATA_DIR" \
+  --edge-features "$EDGE_FEATURES" \
+  --targets-file "$PROJECT_DIR/cluster/targets.txt" \
+  --allow-missing-files
 
 if [[ -f "$SPLIT_MANIFEST" ]]; then
   echo "Split manifest already exists, reusing: $SPLIT_MANIFEST"

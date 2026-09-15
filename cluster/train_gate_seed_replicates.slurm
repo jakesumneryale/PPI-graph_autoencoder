@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=gate_seed_replicates
 #SBATCH --partition=pi_co54
-#SBATCH --array=1-3
+#SBATCH --array=1-6
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=10G
@@ -9,7 +9,14 @@
 #SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
 #SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
 
-# Three replicates of ONE configuration, differing only in --seed.
+# Six runs: two configurations x three seeds.
+#
+#   tasks 1-3  CONFIG=base  base features, no Voronoi, no interface-node degree
+#   tasks 4-6  CONFIG=full  all features, Voronoi area as an input-only feature
+#
+# base is the control. It was the best cell of the previous ablation, so if
+# full does not beat it by more than the seed spread, the extra features are
+# not earning their place.
 #
 # Held identical across the three:
 #   * the train/val/test target split, from the shared manifest written by
@@ -50,11 +57,12 @@ if [[ ! -f "$SPLIT_MANIFEST" ]]; then
 fi
 
 SEEDS=(7 17 27)
-SEED="${SEEDS[$((SLURM_ARRAY_TASK_ID - 1))]}"
+CONFIGS=(base full)
+SEED_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) % 3 ))
+CONFIG_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / 3 ))
+SEED="${SEEDS[$SEED_INDEX]}"
+CONFIG="${CONFIGS[$CONFIG_INDEX]}"
 
-# CONFIG=full   all features, Voronoi area as an input-only edge feature (default)
-# CONFIG=base   the previous best cell: base features, no Voronoi, no node degree
-CONFIG="${CONFIG:-full}"
 case "$CONFIG" in
   full)
     NODE_FEATURES="aa_type,chain,interface_nodes,rsasa_i,interface_node_degree"
