@@ -29,6 +29,10 @@ def parse_args() -> argparse.Namespace:
         help="Optional file of target names (one per line) restricting which HDF5 files are checked.",
     )
     parser.add_argument(
+        "--model-list-dir",
+        help="Directory of <target>.txt model selections, using the same format as training. Empty lists skip a target; missing lists fail.",
+    )
+    parser.add_argument(
         "--max-groups-per-file",
         type=int,
         default=0,
@@ -61,22 +65,39 @@ def resolve_files(data: Path, targets_file: Path | None) -> tuple[list[Path], li
     return files, absent
 
 
-def check_file(path: Path, features: list[str], max_groups: int) -> tuple[int, dict[str, int]]:
+def check_file(
+    path: Path, features: list[str], max_groups: int, model_list_dir: Path | None = None,
+) -> tuple[int, dict[str, int]]:
     missing_counts: dict[str, int] = {}
     checked = 0
+    selected = None
+    if model_list_dir is not None:
+        list_path = model_list_dir / f"{path.stem}.txt"
+        selected = {
+            line.strip().split("\t", 1)[0]
+            for line in list_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        if not selected:
+            return 0, {}
     with h5py.File(path, "r") as handle:
-        group_names = sorted(handle.keys())
+        if selected is not None:
+            absent = selected - set(handle.keys())
+            if absent:
+                raise ValueError(f"selected models absent from HDF5: {', '.join(sorted(absent)[:5])}")
+        group_names = sorted(handle.keys() if selected is None else selected)
         if max_groups > 0:
             group_names = group_names[:max_groups]
         for group_name in group_names:
-            edge_group = handle[group_name].get("edge_features")
-            if edge_group is None:
+            checked += 1
+            group = handle[group_name]
+            edge_group = group.get("edge_features") if isinstance(group, h5py.Group) else None
+            if not isinstance(edge_group, h5py.Group):
                 missing_counts["<no edge_features group>"] = missing_counts.get("<no edge_features group>", 0) + 1
                 continue
             for feature in features:
                 if feature not in edge_group:
                     missing_counts[feature] = missing_counts.get(feature, 0) + 1
-            checked += 1
     return checked, missing_counts
 
 
@@ -85,6 +106,10 @@ def main() -> int:
     data = Path(args.data)
     features = [item.strip() for item in args.edge_features.split(",") if item.strip()]
     targets_file = Path(args.targets_file) if args.targets_file else None
+    model_list_dir = Path(args.model_list_dir) if args.model_list_dir else None
+    if model_list_dir is not None and not model_list_dir.is_dir():
+        print(f"Model-list directory does not exist: {model_list_dir}", file=sys.stderr)
+        return 2
 
     files, absent = resolve_files(data, targets_file)
     if not files:
@@ -92,13 +117,15 @@ def main() -> int:
         return 2
 
     print(f"Verifying {features} across {len(files)} file(s) from {data}")
+    if model_list_dir is not None:
+        print(f"Checking only models selected by {model_list_dir}")
     failures: list[str] = []
     total_groups = 0
     for path in files:
         try:
-            checked, missing = check_file(path, features, args.max_groups_per_file)
-        except OSError as exc:
-            failures.append(f"{path.name}: unreadable ({exc})")
+            checked, missing = check_file(path, features, args.max_groups_per_file, model_list_dir)
+        except (OSError, ValueError) as exc:
+            failures.append(f"{path.name}: {exc}")
             continue
         total_groups += checked
         if missing:
@@ -113,6 +140,8 @@ def main() -> int:
             failures.append(message)
 
     print(f"Checked {total_groups} graph group(s).")
+    if total_groups == 0:
+        failures.append("No graph groups were checked; verify the model selection and data paths.")
     if failures:
         print(f"\nFAILED: {len(failures)} file(s)/condition(s) incomplete:", file=sys.stderr)
         for line in failures[:25]:

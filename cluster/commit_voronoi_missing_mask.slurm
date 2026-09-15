@@ -22,7 +22,7 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
-GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+GRAPH_DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}}"
 RUN_DIR="$PROJECT_DIR/voronoi_run"
 TARGETS_FILE="$PROJECT_DIR/cluster/targets.txt"
 MASK_MARKER_DIR="$RUN_DIR/committed_mask"

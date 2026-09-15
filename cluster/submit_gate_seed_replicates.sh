@@ -8,7 +8,7 @@
 #   stage 3  train_gate_seed_replicates.slurm      array 1-6,   GPU
 #
 # Each stage is chained with afterok, so the GPU jobs only start once every
-# graph carries voronoi_contact_missing and the shared split exists. Nothing is
+# selected training graph carries voronoi_contact_missing and the shared split exists. Nothing is
 # recomputed: the mask is copied from checkpoints that already contain it.
 #
 # Safe to rerun. Committed targets are skipped via markers, and an existing
@@ -19,7 +19,10 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR
+export DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}}"
 cd "$PROJECT_DIR"
+mkdir -p "$PROJECT_DIR/voronoi_run/logs"
 
 if [[ "${SKIP_MASK:-0}" == "1" ]]; then
   echo "SKIP_MASK=1: not submitting the mask-commit stage."

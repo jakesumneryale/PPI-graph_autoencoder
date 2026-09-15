@@ -33,7 +33,7 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
-DATA_DIR="${DATA_DIR:-/home/jas485/project_pi_co54/jas485/ppi_processed_graphs}"
+DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}}"
 MODEL_LIST_DIR="${MODEL_LIST_DIR:-$PROJECT_DIR/voronoi_dataset_audit/successful_models}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$PROJECT_DIR/gate_run/seed_replicates}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-$OUTPUT_ROOT/shared_target_splits.json}"
