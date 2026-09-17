@@ -43,6 +43,7 @@ def write_model_group(group: h5py.Group, result: SurfaceElectrostatics) -> None:
     structure = result.structure
     prepared = result.prepared
     group.attrs["model_id"] = result.model_id
+    group.attrs["residue_statistics_area_weighted"] = True
     group.attrs["source_pdb_path"] = str(result.pdb_path)
     group.attrs["num_atoms"] = int(len(structure))
     group.attrs["num_residues"] = int(len(result.residue_number))

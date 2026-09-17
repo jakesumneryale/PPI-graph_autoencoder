@@ -28,6 +28,9 @@ class GraphAttentionAutoencoder(nn.Module):
         residual_connections: bool = False,
         num_gat_layers: int | None = None,
         out_edge_feats: int | None = None,
+        pooling: str = "all",
+        esm_dim: int = 0,
+        esm_projection_dim: int = 64,
     ) -> None:
         super().__init__()
         if in_node_feats <= 0:
@@ -59,10 +62,17 @@ class GraphAttentionAutoencoder(nn.Module):
         self.dropout = dropout
         self.residual_connections = residual_connections
         self.num_gat_layers = num_gat_layers
+        if pooling not in ("all", "interface"):
+            raise ValueError("pooling must be all or interface")
+        self.pooling = pooling
+        self.esm_dim = esm_dim
+        self.esm_projector = (nn.Sequential(nn.LayerNorm(esm_dim),
+            nn.Linear(esm_dim, esm_projection_dim), nn.SiLU()) if esm_dim else None)
+        encoder_dim = in_node_feats + (esm_projection_dim if esm_dim else 0)
 
         edge_dim = in_edge_feats or None
         self.gat1 = GATConv(
-            in_channels=in_node_feats,
+            in_channels=encoder_dim,
             out_channels=hidden_dim,
             heads=gat_heads,
             concat=True,
@@ -89,7 +99,7 @@ class GraphAttentionAutoencoder(nn.Module):
             for _ in range(num_gat_layers - 2)
         )
         self.input_residual = (
-            nn.Linear(in_node_feats, hidden_dim * gat_heads, bias=False)
+            nn.Linear(encoder_dim, hidden_dim * gat_heads, bias=False)
             if residual_connections
             else None
         )
@@ -160,7 +170,7 @@ class GraphAttentionAutoencoder(nn.Module):
             edge_attr: optional ``[total_edges, in_edge_feats]`` edge features.
             batch: optional node-to-graph assignment vector.
         """
-        x = data.x.float()
+        x = self.encoder_inputs(data)
         edge_index = data.edge_index.long()
         edge_attr = getattr(data, "edge_attr", None)
         if edge_attr is not None:
@@ -187,12 +197,32 @@ class GraphAttentionAutoencoder(nn.Module):
                 h = F.dropout(h, p=self.dropout, training=self.training)
 
         node_z = self.node_projector(h)
-        pooled = torch.cat(
-            [global_mean_pool(node_z, batch), global_max_pool(node_z, batch)],
-            dim=-1,
-        )
+        pooled = self.pool_nodes(node_z, batch, data)
         graph_z = self.graph_projector(pooled)
         return node_z, graph_z
+
+    def encoder_inputs(self, data):
+        x = data.x.float()
+        if self.esm_projector is not None:
+            esm = getattr(data, "esm", None)
+            if esm is None or esm.shape != (x.size(0), self.esm_dim):
+                raise ValueError("Missing or incorrectly shaped per-residue ESM embeddings")
+            x = torch.cat((x, self.esm_projector(esm.float())), dim=-1)
+        return x
+
+    def pool_nodes(self, node_z, batch, data):
+        size = int(batch.max()) + 1
+        if self.pooling == "interface":
+            mask = getattr(data, "interface_mask", None)
+            if mask is None or mask.numel() != node_z.size(0):
+                raise ValueError("Interface pooling requires one interface_mask value per node")
+            mask = mask.view(-1).bool()
+            counts = torch.bincount(batch[mask], minlength=size)
+            if (counts == 0).any():
+                raise ValueError("Interface pooling encountered a graph with no interface nodes")
+            node_z, batch = node_z[mask], batch[mask]
+        return torch.cat((global_mean_pool(node_z, batch, size=size),
+                          global_max_pool(node_z, batch, size=size)), dim=-1)
 
     def decode_edge_features(self, node_z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """Reconstruct edge attributes for the provided edge list."""

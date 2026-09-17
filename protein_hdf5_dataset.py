@@ -132,6 +132,7 @@ def compute_edge_feature_stats(
     transforms: dict[str, str],
     max_graphs: int = 200,
     seed: int = 7,
+    model_list_dir: str | Path | None = None,
 ) -> dict[str, tuple[float, float]]:
     """Mean and std of each named edge feature, after its transform.
 
@@ -154,6 +155,10 @@ def compute_edge_feature_stats(
             continue
         with handle:
             group_names = sorted(handle.keys())
+            if model_list_dir is not None:
+                allowed = {line.split("\t", 1)[0].strip() for line in
+                           (Path(model_list_dir) / f"{path.stem}.txt").read_text().splitlines()}
+                group_names = [name for name in group_names if name in allowed]
             if not group_names:
                 continue
             take = min(len(group_names), max(1, max_graphs // max(len(resolved_paths), 1)))
@@ -165,6 +170,13 @@ def compute_edge_feature_stats(
                     if name not in edge_group:
                         continue
                     values = _as_float_matrix(edge_group[name][()])
+                    if name.startswith("apbs_pair_") and name != "apbs_pair_missing":
+                        valid = np.asarray(edge_group["apbs_pair_missing"][()]).reshape(-1) == 0
+                        if name == "apbs_pair_area_product":
+                            valid &= np.asarray(edge_group["voronoi_contact_missing"][()]).reshape(-1) == 0
+                        values = values[valid]
+                        if not values.size:
+                            continue
                     accumulated[name].append(apply_feature_transform(values, transforms.get(name, "none")))
                 graphs_seen += 1
                 if graphs_seen >= max_graphs:
@@ -243,8 +255,12 @@ class ProteinGraphHDF5Dataset(Dataset):
         model_list_dir: str | Path | None = None,
         edge_feature_transforms: dict[str, str] | None = None,
         edge_feature_stats: dict[str, tuple[float, float]] | None = None,
+        use_esm: bool = False,
+        require_pos: bool = False,
     ) -> None:
         self.paths = _resolve_hdf5_paths(paths)
+        self.use_esm = use_esm
+        self.require_pos = require_pos
         self.node_features = tuple(node_features)
         self.edge_features = tuple(edge_features)
         self.target_name = target_name
@@ -464,6 +480,11 @@ class ProteinGraphHDF5Dataset(Dataset):
             stats = self.edge_feature_stats.get(feature_name)
             if transform != "none" or stats is not None:
                 values = normalize_feature_block(values, transform, stats).astype(np.float32)
+            if feature_name.startswith("apbs_pair_") and feature_name != "apbs_pair_missing":
+                missing = np.asarray(edge_group["apbs_pair_missing"][()]).reshape(-1) != 0
+                if feature_name == "apbs_pair_area_product":
+                    missing |= np.asarray(edge_group["voronoi_contact_missing"][()]).reshape(-1) != 0
+                values[missing] = 0
             blocks.append(values)
         return np.concatenate(blocks, axis=1)
 
@@ -533,6 +554,19 @@ class ProteinGraphHDF5Dataset(Dataset):
             edge_index=edge_index,
             edge_attr=edge_attr_tensor,
         )
+        if "interface_nodes" in group["node_features"]:
+            data.interface_mask = torch.from_numpy(
+                np.asarray(group["node_features/interface_nodes"][()]).reshape(-1) > 0)
+        for required, key, attr in ((self.use_esm, "esm2", "esm"), (self.require_pos, "pos", "pos")):
+            if required:
+                if key not in group:
+                    raise KeyError(f"{sample}: missing prepared {key}")
+                values = np.asarray(group[key][()], dtype=np.float32)
+                if values.ndim != 2 or len(values) != num_nodes or not np.isfinite(values).all():
+                    raise ValueError(f"{sample}: invalid {key}")
+                if key == "pos" and values.shape[1] != 3:
+                    raise ValueError("pos must have shape [N, 3]")
+                setattr(data, attr, torch.from_numpy(values))
         if self._has_target(group):
             target = float(group["target_scores"][self.target_name][()])
             data.y = torch.tensor([target], dtype=torch.float32)

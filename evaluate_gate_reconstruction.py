@@ -26,6 +26,7 @@ import torch
 from torch_geometric.loader import DataLoader
 
 from GATE_model import GraphAttentionAutoencoder
+from EGNN_model import build_graph_model
 from protein_hdf5_dataset import (
     ProteinGraphHDF5Dataset,
     apply_cluster_path_defaults,
@@ -45,6 +46,11 @@ EDGE_FEATURE_DIMS = {
     "ca_dist": 1,
     "voronoi_contact_area": 1,
     "voronoi_contact_missing": 1,
+    "apbs_pair_mean": 1,
+    "apbs_pair_absdiff": 1,
+    "apbs_pair_product": 1,
+    "apbs_pair_area_product": 1,
+    "apbs_pair_missing": 1,
 }
 
 
@@ -546,6 +552,8 @@ def evaluate_checkpoint(
         model_list_dir=checkpoint_args.get("model_list_dir", args.model_list_dir),
         edge_feature_transforms=edge_feature_transforms,
         edge_feature_stats=edge_feature_stats,
+        use_esm=checkpoint_args.get("use_esm", False),
+        require_pos=checkpoint_args.get("architecture", "gat") == "egnn",
     )
     print(
         "Building evaluation dataloader with "
@@ -554,7 +562,11 @@ def evaluate_checkpoint(
     )
     loader = DataLoader(dataset, **make_dataloader_kwargs(args, device))
 
-    model = GraphAttentionAutoencoder(
+    model = build_graph_model(
+        architecture=checkpoint_args.get("architecture", "gat"),
+        pooling=checkpoint_args.get("pooling", "all"),
+        esm_dim=checkpoint.get("esm_dim", 0),
+        esm_projection_dim=checkpoint_args.get("esm_projection_dim", 64),
         in_node_feats=checkpoint["in_node_feats"],
         in_edge_feats=checkpoint["in_edge_feats"],
         hidden_dim=checkpoint_args["hidden_dim"],

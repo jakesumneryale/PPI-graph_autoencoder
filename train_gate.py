@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover - compatibility fallback for older PyG.
     batched_negative_sampling = None
 
 from GATE_model import GraphAttentionAutoencoder
+from EGNN_model import build_graph_model
 from evaluate_gate_reconstruction import evaluate_checkpoint, write_csv
 from protein_hdf5_dataset import (
     DEFAULT_EDGE_FEATURES,
@@ -697,6 +698,12 @@ def main() -> None:
     parser.add_argument("--eval-negative-ratio", type=float, default=1.0)
     parser.add_argument("--eval-log-every", type=int, default=1000)
     parser.add_argument("--strict-hdf5", action="store_true", help="Fail instead of skipping unreadable HDF5 files.")
+    parser.add_argument("--architecture", choices=("gat", "egnn"), default="gat")
+    parser.add_argument("--pooling", choices=("all", "interface"), default="all")
+    parser.add_argument("--use-esm", action="store_true")
+    parser.add_argument("--esm-projection-dim", type=int, default=64)
+    parser.add_argument("--validation-only-during-training", action="store_true",
+                        help="Keep the test set sealed until the best validation checkpoint is chosen.")
     args = parser.parse_args()
     apply_cluster_path_defaults(args)
 
@@ -725,6 +732,7 @@ def main() -> None:
         optional_node_features_dir=args.optional_node_features_dir,
         model_list_dir=args.model_list_dir,
         edge_feature_transforms=edge_feature_transforms,
+        use_esm=args.use_esm, require_pos=args.architecture == "egnn",
     )
     print("Dataset indexed.")
     first_graph = dataset[0]
@@ -733,7 +741,10 @@ def main() -> None:
     edge_recon_features = resolve_edge_recon_features(args, edge_features)
     recon_columns = edge_recon_column_indices(edge_feature_slices, edge_recon_features)
 
-    model = GraphAttentionAutoencoder(
+    model = build_graph_model(
+        architecture=args.architecture, pooling=args.pooling,
+        esm_dim=first_graph.esm.size(1) if args.use_esm else 0,
+        esm_projection_dim=args.esm_projection_dim,
         in_node_feats=first_graph.x.size(1),
         in_edge_feats=first_graph.edge_attr.size(1),
         hidden_dim=args.hidden_dim,
@@ -798,8 +809,12 @@ def main() -> None:
             standardize_features,
             edge_feature_transforms,
             max_graphs=args.edge_stats_max_graphs,
+            model_list_dir=args.model_list_dir,
             seed=args.seed if args.edge_stats_seed is None else args.edge_stats_seed,
         )
+        absent_stats = set(standardize_features) - set(edge_feature_stats)
+        if absent_stats:
+            raise ValueError(f"No valid training observations to standardize: {sorted(absent_stats)}")
         # Applied in place: the single dataset object is shared by all three
         # Subsets, and the dataloaders below have not been built yet.
         dataset.edge_feature_stats = edge_feature_stats
@@ -878,7 +893,9 @@ def main() -> None:
             )
             with torch.no_grad():
                 val_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer)
-                test_metrics = run_epoch(model, test_loader, optimizer, device, args, train=False, balancer=balancer)
+                test_metrics = ({name: float("nan") for name in LOSS_METRIC_NAMES}
+                                if args.validation_only_during_training else
+                                run_epoch(model, test_loader, optimizer, device, args, train=False, balancer=balancer))
 
             writer.writerow(
                 flatten_history_row(
@@ -915,6 +932,7 @@ def main() -> None:
                         "edge_feature_transforms": edge_feature_transforms,
                         "edge_feature_stats": edge_feature_stats,
                         "in_node_feats": first_graph.x.size(1),
+                        "esm_dim": first_graph.esm.size(1) if args.use_esm else 0,
                         "in_edge_feats": first_graph.edge_attr.size(1),
                         "best_loss": best_val_metric,
                         "best_metric": args.checkpoint_metric,
