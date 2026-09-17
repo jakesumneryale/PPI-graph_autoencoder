@@ -12,6 +12,7 @@ from pathlib import Path
 import tempfile
 from contextlib import ExitStack
 from functools import lru_cache
+from collections import Counter
 from add_interface_node_degree import calculate_interface_node_degree
 
 import h5py
@@ -84,31 +85,69 @@ def load_embeddings(root, target, graph_name, residues, fasta_template, embeddin
     context = dict(target=target, graph=graph_name)
     fasta = root / fasta_template.format(**context)
     records, fasta_hash = read_fasta(fasta)
-    blocks = []
-    provenance = {'fasta': str(fasta), 'fasta_sha256': fasta_hash, 'layer': layer, 'chains': {}}
-    for chain in dict.fromkeys(r[0] for r in residues):
-        path = root / embedding_template.format(**context, chain=chain)
-        label, tensor, embedding_hash = read_embedding(path, layer)
-        if label not in records:
-            raise ValueError(f'{path}: embedding label {label!r} absent from FASTA')
-        sequence = records[label]
-        if tensor.ndim != 2 or tensor.shape[0] != len(sequence):
-            raise ValueError(f'{path}: embedding length must equal FASTA length (no BOS/EOS rows)')
+    chains = list(dict.fromkeys(r[0] for r in residues))
+    candidates = {}
+    for chain in chains:
         graph_sequence = ''.join(aa for c, aa in residues if c == chain)
-        # Exact sequence or one unique contiguous fragment is unambiguous. Never
-        # guess through internal gaps, repeated motifs, mutations or chain swaps.
-        starts = [i for i in range(len(sequence) - len(graph_sequence) + 1)
-                  if sequence[i:i + len(graph_sequence)] == graph_sequence]
-        if len(starts) != 1:
-            raise ValueError(f'{path}: chain {chain} has no unique exact sequence alignment; regenerate embeddings for its PDB sequence')
-        start = starts[0]
-        block = tensor[start:start + len(graph_sequence)]
-        if not np.isfinite(block).all():
-            raise ValueError(f'{path}: nonfinite embedding')
-        blocks.append(block)
-        provenance['chains'][chain] = {'path': str(path), 'sha256': embedding_hash, 'label': label,
-                                        'start': start, 'length': len(graph_sequence)}
-    return np.concatenate(blocks), provenance
+        candidates[chain] = []
+        for label, sequence in records.items():
+            # FASTA labels define embedding filenames; PDB labels do not.
+            # Example: source E/I can match standardized 1acb.A/1acb.B.
+            embedding_chain = label.rsplit('.', 1)[-1]
+            starts = [i for i in range(len(sequence) - len(graph_sequence) + 1)
+                      if sequence[i:i + len(graph_sequence)] == graph_sequence]
+            if len(starts) != 1:
+                continue
+            path = root / embedding_template.format(**context, chain=embedding_chain)
+            stored_label, tensor, embedding_hash = read_embedding(path, layer)
+            if stored_label != label:
+                raise ValueError(f'{path}: embedding label {stored_label!r} does not match FASTA {label!r}')
+            if tensor.ndim != 2 or tensor.shape[0] != len(sequence):
+                raise ValueError(f'{path}: embedding length must equal FASTA length (no BOS/EOS rows)')
+            start = starts[0]
+            block = tensor[start:start + len(graph_sequence)]
+            if not np.isfinite(block).all():
+                raise ValueError(f'{path}: nonfinite embedding')
+            candidates[chain].append((label, block, {
+                'path': str(path), 'sha256': embedding_hash, 'label': label,
+                'embedding_chain': embedding_chain, 'start': start, 'length': len(graph_sequence)}))
+        if not candidates[chain]:
+            raise ValueError(f'{fasta}: PDB chain {chain} has no unique exact sequence alignment; '
+                             'regenerate embeddings for its PDB sequence')
+
+    # Require a one-to-one chain assignment. Homomer ambiguity is harmless only
+    # when every possible assignment gives exactly the same per-node features.
+    first = None
+    equivalent = 0
+    def assign(index, used, mapping):
+        nonlocal first, equivalent
+        if index == len(chains):
+            if first is None:
+                first = dict(mapping)
+            elif any(not np.array_equal(first[c][1], mapping[c][1]) for c in chains):
+                raise ValueError(f'{fasta}: ambiguous chain sequence alignment produces different embeddings')
+            equivalent += 1
+            return
+        chain = chains[index]
+        for candidate in candidates[chain]:
+            if candidate[0] not in used:
+                mapping[chain] = candidate
+                assign(index + 1, used | {candidate[0]}, mapping)
+    assign(0, set(), {})
+    if first is None:
+        raise ValueError(f'{fasta}: no one-to-one chain sequence alignment')
+    widths = {first[c][1].shape[1] for c in chains}
+    if len(widths) != 1:
+        raise ValueError(f'{fasta}: inconsistent embedding widths')
+    embedding = np.empty((len(residues), widths.pop()), dtype=np.float32)
+    provenance = {'fasta': str(fasta), 'fasta_sha256': fasta_hash, 'layer': layer,
+                  'mapping_method': 'sequence_one_to_one', 'equivalent_assignments': equivalent,
+                  'chains': {}}
+    for chain in chains:
+        indices = [i for i, (c, _) in enumerate(residues) if c == chain]
+        embedding[indices] = first[chain][1]
+        provenance['chains'][chain] = first[chain][2]
+    return embedding, provenance
 
 
 def contact_indices(graph, n):
@@ -250,7 +289,12 @@ def prepare_target(args, target):
         audit_path = args.output / f'{target}.audit.json'
         audit_path.write_text(json.dumps(audit, indent=2) + '\n')
         if not audit['accepted']:
-            raise ValueError(f'{target}: no eligible graphs; see {audit_path}')
+            reasons = Counter(audit['rejected'].values())
+            summary = '\n'.join(f'  {count} graph(s): {reason}'
+                                for reason, count in reasons.most_common(5))
+            raise ValueError(
+                f'{target}: no eligible graphs; {len(audit["rejected"])} rejected. '
+                f'Most common reasons:\n{summary}\nFull audit: {audit_path}')
         os.replace(temporary, destination)
         print(f"{target}: {len(audit['accepted'])} accepted, {len(audit['rejected'])} rejected")
     finally:

@@ -56,7 +56,7 @@ export FASTA_TEMPLATE='{target}/{graph}/{target}_all.fasta'
 export EMBEDDING_TEMPLATE='{target}/{graph}/{target}.{chain}.pt'
 ```
 
-Use the actual SS_embeds layout. Target-level embeddings are appropriate only when decoy chain sequences match those target sequences. Loaded chains are cached during preparation, avoiding repeated reads of the same large tensor files. Source file hashes, selected layer, and matched offsets are recorded. ESM features are layer-normalized and projected through a trainable 64-dimensional projection before entering the encoder. They are not reconstruction targets.
+Here `{chain}` refers to the embedding label suffix in the FASTA (usually A/B), not the original PDB chain ID. Source chains such as E/I are assigned one-to-one to FASTA records by exact sequence matching, regardless of chain order, and the mapping is recorded in provenance. Multiple assignments are accepted only if they yield identical embeddings for every node; otherwise preparation rejects the ambiguous mapping. Use the actual SS_embeds layout. Target-level embeddings are appropriate only when decoy chain sequences match those target sequences. Loaded chains are cached during preparation, avoiding repeated reads of the same large tensor files. Source file hashes, selected layer, and matched offsets are recorded. ESM features are layer-normalized and projected through a trainable 64-dimensional projection before entering the encoder. They are not reconstruction targets.
 
 ## 2. Freeze the target split and training protocol
 

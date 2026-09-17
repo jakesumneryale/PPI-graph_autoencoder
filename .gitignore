@@ -13,3 +13,6 @@ apbs_analysis/approach_movie.py
 
 # Local Python 3.13 venv for the analysis notebooks
 .venv/
+
+# Read-only local data audit outputs
+/local_data_audit/

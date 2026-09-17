@@ -16,3 +16,21 @@ from the requested allocation or a script's name.
 - Reuse valid completed preprocessing and results when correcting resource
   requests; do not rerun expensive work solely because it requested extra CPUs.
 - Do not add Slurm array concurrency caps unless the user asks for them.
+
+
+# Local prototyping and data reuse
+
+- Prefer local preflight and training on the existing 10% subset before cluster
+  dispatch. Audit all local graph files separately; do not expand training to
+  the full dataset merely because it is present.
+- Existing inputs are under /scratch/ppi_autoencoder_code/processed_graph_data,
+  /scratch/ppi_autoencoder_code/rsasa_i_data, and
+  /scratch/uniformly_sampled_ppi_data. Inspect these before downloading data.
+- Local graph copies may predate cluster features. Verify versions/coverage and
+  content hashes; reuse identical PDB/CSV/embedding files without downloading
+  them again. Never overwrite existing original datasets during local setup.
+- Workstation Globus collection: 60ab259b-1d82-11f1-bd71-0e34a6ec9899.
+  Bouchet collection: a2bf0df9-5633-4565-b083-b8907423bb77.
+- Local transfer destination: /scratch/ppi_extension_data/full. Verify endpoint
+  path permissions and actual CUDA access; do not claim GPU validation from
+  CPU-only tests.

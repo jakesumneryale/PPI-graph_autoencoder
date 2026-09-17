@@ -75,6 +75,18 @@ def test_real_esm_examples():
     assert embedding.shape == (304, 1280)
     expected = torch.load(root / '1acb.B.pt', weights_only=True)['representations'][33]
     np.testing.assert_array_equal(embedding[241:], expected.numpy())
+    # Source chain labels differ from the standardized ESM filenames.
+    renamed = [('E' if c == 'A' else 'I', aa) for c, aa in residues]
+    remapped, provenance = load_embeddings(root, '1acb', 'unused', renamed,
+        '{target}_all.fasta', '{target}.{chain}.pt', 33)
+    np.testing.assert_array_equal(remapped, embedding)
+    assert provenance['chains']['E']['embedding_chain'] == 'A'
+    assert provenance['chains']['I']['embedding_chain'] == 'B'
+    # Chain order must not determine the mapping.
+    reordered = renamed[241:] + renamed[:241]
+    swapped, provenance = load_embeddings(root, '1acb', 'unused', reordered,
+        '{target}_all.fasta', '{target}.{chain}.pt', 33)
+    np.testing.assert_array_equal(swapped, np.concatenate((embedding[241:], embedding[:241])))
     with pytest.raises(ValueError, match='sequence alignment'):
         load_embeddings(root, '1acb', 'unused', [('A', 'X')] + residues[1:],
             '{target}_all.fasta', '{target}.{chain}.pt', 33)
@@ -300,3 +312,14 @@ def test_preflight_records_only_empty_target_exclusions(tmp_path):
     (data / 'broken.hdf5').write_text('not hdf5')
     with pytest.raises(OSError):
         prepare_target_list(data, tmp_path / 'bad_output')
+
+
+
+def test_ambiguous_chain_mapping_rejects_different_embeddings(tmp_path):
+    (tmp_path / 'demo_all.fasta').write_text('>demo.A\nAA\n>demo.B\nAA\n')
+    for i, chain in enumerate(('A', 'B')):
+        torch.save({'label': f'demo.{chain}', 'representations': {33: torch.full((2, 8), float(i))}},
+                   tmp_path / f'demo.{chain}.pt')
+    with pytest.raises(ValueError, match='ambiguous chain sequence alignment'):
+        load_embeddings(tmp_path, 'demo', 'unused', [('E', 'A')] * 2 + [('I', 'A')] * 2,
+                        '{target}_all.fasta', '{target}.{chain}.pt', 33)
