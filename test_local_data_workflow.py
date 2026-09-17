@@ -116,3 +116,61 @@ def test_local_reuse_requires_content_match(tmp_path):
     plan(config)
     assert 'complex.0_0_0_corrected_H_0001.pdb' in (local / '.globus-transfer.txt').read_text()
     assert not (local / 'pdb/sampled_1abc/complex.0_0_0_corrected_H_0001.pdb').exists()
+
+
+def test_missing_apbs_is_audited_before_copying_and_explicitly_excludable(tmp_path, monkeypatch):
+    args = inputs(tmp_path)
+    missing = 'complex.19398_5'
+    with h5py.File(args.subset / '1abc.hdf5', 'a') as f:
+        f.copy('complex.0_0_0', missing)
+    # A second nonempty target has no APBS store at all.
+    with h5py.File(args.subset / 'empty.hdf5', 'a') as f:
+        f.create_group('complex.1_2')
+    import bundle_local_extension_data as bundle
+    original_copy = bundle.copy_file
+    def unexpected_copy(*_):
+        pytest.fail('Preflight should fail before copying files')
+    monkeypatch.setattr(bundle, 'copy_file', unexpected_copy)
+    with pytest.raises(ValueError, match='Missing APBS inputs'):
+        build_bundle(args)
+    report = json.loads((tmp_path / 'bundle.preflight.json').read_text())
+    assert report['selected_graphs'] == 3 and report['matched_graphs'] == 1
+    assert len(report['missing_graphs']) == 2
+    assert report['missing_graphs'][0]['model_kind'] == 'random_negative'
+    assert not args.output.exists()
+    monkeypatch.setattr(bundle, 'copy_file', original_copy)
+    args.missing_apbs = 'exclude'
+    manifest = build_bundle(args)
+    assert manifest['targets'] == {'1abc': ['complex.0_0_0']}
+    assert manifest['apbs_coverage']['excluded_apbs_targets'] == ['empty']
+    with h5py.File(args.output / 'subset_hdf5/1abc.hdf5') as f:
+        assert list(f) == ['complex.0_0_0']
+        assert f.attrs['voronoi_subset_model_count'] == 1
+    assert 'apbs_coverage.json' in manifest['file_sha256']
+
+
+def test_corrected_apbs_alias_and_preflight_only(tmp_path):
+    args = inputs(tmp_path)
+    with h5py.File(args.apbs_dir / '1abc_apbs_surface.hdf5', 'a') as f:
+        f.move('complex.0_0_0', 'complex.0_0_0_corrected')
+    args.preflight_only = True
+    report = build_bundle(args)
+    assert report['matched_graphs'] == 1
+    assert not args.output.exists()
+    args.preflight_only = False
+    build_bundle(args)
+    with h5py.File(args.output / 'apbs_model_data/1abc_apbs_surface.hdf5') as f:
+        assert list(f) == ['complex.0_0_0_corrected']
+
+
+def test_exclude_never_hides_corrupt_store_or_publishes_empty_bundle(tmp_path):
+    args = inputs(tmp_path)
+    args.missing_apbs = 'exclude'
+    path = args.apbs_dir / '1abc_apbs_surface.hdf5'
+    path.write_bytes(b'not an HDF5 file')
+    with pytest.raises(ValueError, match='Unreadable APBS stores'):
+        build_bundle(args)
+    path.unlink()
+    with pytest.raises(ValueError, match='No graphs with matching APBS'):
+        build_bundle(args)
+    assert not args.output.exists()

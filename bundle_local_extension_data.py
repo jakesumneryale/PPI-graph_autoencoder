@@ -31,6 +31,68 @@ def copy_file(source, destination):
     shutil.copy2(source, destination)
 
 
+def preflight_apbs(args, targets, audit_path):
+    """Check every selected APBS key before copying any large input files."""
+    report = {'missing_apbs_policy': getattr(args, 'missing_apbs', 'error'),
+              'targets': {}, 'excluded_empty_targets': [], 'excluded_apbs_targets': [],
+              'missing_graphs': [], 'errors': []}
+    selected = {}
+    for target in targets:
+        source = resolve_target_graph_hdf5(args.subset, target)
+        with h5py.File(source, 'r') as subset:
+            names = sorted(subset)
+        if args.mode == 'smoke':
+            names = names[:3]
+        if not names:
+            report['excluded_empty_targets'].append(target)
+            continue
+        path = args.apbs_dir / f'{target}_apbs_surface.hdf5'
+        matches = {}
+        missing = []
+        # A missing store is recorded explicitly; a corrupt/unreadable store
+        # is a hard error, not grounds for quietly excluding its graphs.
+        try:
+            if path.exists():
+                with h5py.File(path, 'r') as apbs:
+                    for name in names:
+                        base = name.removesuffix('_corrected')
+                        candidates = [base, base + '_corrected']
+                        key = next((k for k in candidates if isinstance(apbs.get(k), h5py.Group)), None)
+                        if key is None:
+                            missing.append(name)
+                        else:
+                            matches[name] = key
+            else:
+                missing = names
+        except (OSError, RuntimeError) as exc:
+            report['errors'].append({'target': target, 'path': str(path), 'error': str(exc)})
+        for name in missing:
+            relative, kind = infer_relative_pdb_path(target, name)
+            base = name.removesuffix('_corrected')
+            report['missing_graphs'].append({'target': target, 'graph': name,
+                'apbs_path': str(path), 'tried_keys': [base, base + '_corrected'],
+                'pdb_path': str(args.pdb_root / relative), 'model_kind': kind,
+                'reason': 'missing_record' if path.exists() else 'missing_store'})
+        report['targets'][target] = {'selected': len(names), 'matched': len(matches), 'missing': len(missing)}
+        if matches:
+            selected[target] = matches
+        elif missing:
+            report['excluded_apbs_targets'].append(target)
+    report['selected_graphs'] = sum(v['selected'] for v in report['targets'].values())
+    report['matched_graphs'] = sum(len(v) for v in selected.values())
+    audit_path.write_text(json.dumps(report, indent=2) + '\n')
+    print(f'APBS preflight: {report["matched_graphs"]}/{report["selected_graphs"]} graphs matched; '
+          f'{len(report["missing_graphs"])} missing. Audit: {audit_path}', flush=True)
+    if report['errors']:
+        raise ValueError(f'Unreadable APBS stores; see {audit_path}')
+    if report['missing_graphs'] and report['missing_apbs_policy'] == 'error':
+        raise ValueError(f'Missing APBS inputs; see {audit_path}. Repair these records, or explicitly '
+                         'use --missing-apbs exclude to omit these graphs from every model configuration.')
+    if not selected:
+        raise ValueError(f'No graphs with matching APBS records; see {audit_path}')
+    return selected, report
+
+
 def build_bundle(args):
     output = args.output.resolve()
     if output.exists():
@@ -40,20 +102,19 @@ def build_bundle(args):
         sorted({p.stem for pattern in ('*.h5', '*.hdf5') for p in args.subset.glob(pattern)}))
     if not targets or len(set(targets)) != len(targets):
         raise ValueError('Targets must be nonempty and unique')
+    selected, coverage = preflight_apbs(args, targets, output.with_name(output.name + '.preflight.json'))
+    if getattr(args, 'preflight_only', False):
+        return coverage
     stage = Path(tempfile.mkdtemp(prefix=f'.{output.name}.', dir=output.parent))
-    manifest = {'schema': 1, 'mode': args.mode, 'targets': {}, 'excluded_empty_targets': [],
+    manifest = {'schema': 1, 'mode': args.mode, 'targets': {},
+                'excluded_empty_targets': coverage['excluded_empty_targets'], 'apbs_coverage': coverage,
                 'source_paths': {k: str(getattr(args, k)) for k in
                                  ('subset', 'feature_data', 'apbs_dir', 'esm_root', 'pdb_root', 'optional_dir')}}
     try:
-        for target in targets:
+        for target, apbs_matches in selected.items():
             source = resolve_target_graph_hdf5(args.subset, target)
             with h5py.File(source, 'r') as subset:
-                names = sorted(subset)
-                if not names:
-                    manifest['excluded_empty_targets'].append(target)
-                    continue
-                if args.mode == 'smoke':
-                    names = names[:3]
+                names = list(apbs_matches)
                 full_path = resolve_target_graph_hdf5(args.feature_data, target)
                 apbs_path = args.apbs_dir / f'{target}_apbs_surface.hdf5'
                 for directory in ('subset_hdf5', 'apbs_model_data'):
@@ -73,9 +134,7 @@ def build_bundle(args):
                             if not np.array_equal(subset[name][key][()], full[name][key][()]):
                                 raise ValueError(f'{target}/{name}: subset and full graph differ at {key}')
                         full.copy(name, graphs_out, name=name)
-                        apbs_name = name.removesuffix('_corrected')
-                        if apbs_name not in apbs:
-                            apbs_name += '_corrected'
+                        apbs_name = apbs_matches[name]
                         if apbs_name not in apbs_out:
                             apbs.copy(apbs_name, apbs_out, name=apbs_name)
                         relative, _ = infer_relative_pdb_path(target, name)
@@ -97,6 +156,7 @@ def build_bundle(args):
             print(f'{target}: bundled {len(names)} graphs and matching inputs', flush=True)
         if not manifest['targets']:
             raise ValueError('No nonempty targets available')
+        (stage / 'apbs_coverage.json').write_text(json.dumps(coverage, indent=2) + '\n')
         metadata = args.subset.parent
         for filename in ('subset_manifest.csv', 'target_attrition.csv', 'summary.json'):
             if (metadata / filename).is_file():
@@ -119,6 +179,9 @@ def main():
     project = Path('/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder')
     parser.add_argument('--mode', choices=('smoke', 'full'), default='full')
     parser.add_argument('--targets', nargs='+')
+    parser.add_argument('--missing-apbs', choices=('error', 'exclude'), default='error',
+                        help='Fail before copying (default), or exclude missing APBS graphs from the shared cohort')
+    parser.add_argument('--preflight-only', action='store_true', help='Write APBS coverage audit without copying data')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--subset', type=Path, default=project / 'voronoi_dataset_audit/subset_hdf5')
     parser.add_argument('--feature-data', type=Path, default=Path('/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs'))

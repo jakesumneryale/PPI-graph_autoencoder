@@ -23,6 +23,43 @@ sbatch cluster/bundle_local_extension_data.slurm
 
 This requests **one CPU, no GPU**, and performs serial copying/hashing. It creates `local_transfer_full/`, containing every model in each nonempty target of the existing 10% subset. The original selected graph names are preserved; this does not resample the full dataset. The job writes its log to Slurm's default `slurm-JOBID.out`; `bundle_manifest.json` appears only when all copies complete successfully. Do not download an unfinished bundle.
 
+Before copying, the job now checks APBS record coverage across every selected
+target and writes `local_transfer_full.preflight.json` alongside the output
+directory. Both the plain graph name and its `_corrected` alias are checked.
+By default, any missing records stop the job before large files are copied.
+The report lists every missing graph, source store, attempted key, PDB path,
+and whether it is a sampled model or a random negative.
+
+To proceed with the common cohort that has APBS records, explicitly run:
+
+```bash
+sbatch cluster/bundle_local_extension_data.slurm --missing-apbs exclude
+```
+
+This excludes missing graphs from the bundled graph dataset itself, so the
+baseline and all extensions use the same retained cohort. Targets with no
+matches are excluded too. Nothing is filled with zero or resampled. The final
+manifest and `apbs_coverage.json` retain the exclusions and counts. Check the
+attrition before interpreting results, particularly if missing records are
+concentrated among random negatives. Compare all models using this same new
+cohort; earlier runs may have different test graphs. To preserve the entire
+original subset instead, regenerate the missing APBS records and rerun the
+default strict job.
+
+For an audit alone, with no data copying:
+
+```bash
+sbatch cluster/bundle_local_extension_data.slurm --preflight-only --missing-apbs exclude
+```
+
+An unreadable/corrupt APBS store remains an error even with exclusion enabled.
+This preflight checks record existence, not scientific validity; local
+preparation still validates APBS content and alignment. The older bundler
+removed its temporary staging directory on failure, so completed target copies
+from that failed attempt cannot be resumed. The new upfront check prevents
+that repeated copying for missing-APBS failures; it is not a general resume
+mechanism for other copy failures.
+
 For an optional tiny software smoke test (three models each from 1acb, 1avx, and 1ay7), use:
 
 ```bash
