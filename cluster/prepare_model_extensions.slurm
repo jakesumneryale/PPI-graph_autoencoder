@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=prepare_extensions
 #SBATCH --partition=pi_co54
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
 set -euo pipefail
@@ -11,7 +11,13 @@ CONDA_BASE=$(conda info --base)
 source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate py311_env
 source "$PROJECT_DIR/venv/bin/activate"
+# Each process uses one numerical-library thread. Training parallelism comes
+# from DataLoader worker processes; preparation is parallel across array tasks.
 export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
 if [[ "$STAGE" == data ]]; then
   TARGET=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$EXPERIMENT_DIR/targets.txt")
   EXTRA=()

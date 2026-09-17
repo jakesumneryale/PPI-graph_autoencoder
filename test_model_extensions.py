@@ -236,3 +236,18 @@ def test_egnn_coincident_coordinates_have_finite_gradients():
         hidden_dim=8, latent_dim=4, dropout=0, residual_connections=True)
     model(data)['quality_pred'].sum().backward()
     assert all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None)
+
+
+@pytest.mark.parametrize('cpus,requested,expected', [(8, 7, 7), (4, 7, 3), (1, 7, 0), (8, 0, 0)])
+def test_training_workers_fit_cpu_allocation(cpus, requested, expected):
+    from model_extension_experiments import training_command
+    original = {'argv': ['--num-workers', str(requested)]}
+    command = training_command(original, cpus)
+    assert int(command[command.index('--num-workers') + 1]) == expected
+    assert original['argv'][1] == str(requested)  # Frozen matrix is unchanged.
+
+
+def test_training_cpu_allocation_must_be_positive():
+    from model_extension_experiments import training_command
+    with pytest.raises(ValueError, match='positive'):
+        training_command({'argv': ['--num-workers', '7']}, 0)

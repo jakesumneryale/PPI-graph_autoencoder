@@ -118,6 +118,23 @@ def prepare(args):
     print(f'{len(runs)} runs written to {matrix_path}; {len(dataset)} graphs; cohort attrition: {audits}')
 
 
+def training_command(run, cpus_per_task=None):
+    """Cap loader processes to the Slurm budget, reserving one CPU for main."""
+    argv = list(run['argv'])
+    worker_index = argv.index('--num-workers') + 1
+    requested = int(argv[worker_index])
+    if requested < 0:
+        raise ValueError('num-workers cannot be negative')
+    if cpus_per_task is not None:
+        if cpus_per_task < 1:
+            raise ValueError('cpus-per-task must be positive')
+        workers = min(requested, cpus_per_task - 1)
+        argv[worker_index] = str(workers)
+        print(f'CPU allocation: {cpus_per_task}; loader processes: {workers}; '
+              'one main process; numerical-library threads set by cluster script', flush=True)
+    return [sys.executable, str(Path(__file__).with_name('train_gate.py'))] + argv
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='action', required=True)
@@ -133,10 +150,11 @@ def main():
     make.add_argument('--test-fraction', type=float, default=0.15)
     make.add_argument('--epochs', type=int, default=50)
     make.add_argument('--batch-size', type=int, default=16)
-    make.add_argument('--num-workers', type=int, default=8)
+    make.add_argument('--num-workers', type=int, default=7, help='Loader processes; default reserves one of eight CPUs for the main process')
     make.add_argument('--device', default='cuda')
     run = sub.add_parser('run')
     run.add_argument('--matrix', type=Path, required=True)
+    run.add_argument('--cpus-per-task', type=int, help='Actual Slurm CPU allocation; caps loader workers')
     run.add_argument('--task', type=int, required=True, help='One-based Slurm array index')
     args = p.parse_args()
     if args.action == 'prepare':
@@ -145,7 +163,7 @@ def main():
         runs = json.loads(args.matrix.read_text())['runs']
         if not 1 <= args.task <= len(runs):
             raise ValueError('Task index outside matrix')
-        subprocess.run([sys.executable, str(Path(__file__).with_name('train_gate.py'))] + runs[args.task - 1]['argv'], check=True)
+        subprocess.run(training_command(runs[args.task - 1], args.cpus_per_task), check=True)
 
 
 if __name__ == '__main__':
