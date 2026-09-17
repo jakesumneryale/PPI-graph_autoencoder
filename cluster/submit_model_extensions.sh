@@ -14,7 +14,7 @@ export EXTENSION_DATA="${EXTENSION_DATA:-$PROJECT_DIR/extension_data_10pct_$RUN_
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/model_extensions_10pct_$RUN_MODE}"
 export APBS_DIR="${APBS_DIR:-/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data}"
 export PDB_ROOT="${PDB_ROOT:-/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data}"
-export ESM_ROOT="${ESM_ROOT:-/nfs/roberts/pi/pi_co54/nb586/scratch_backup/SS_embeds}"
+export ESM_ROOT="${ESM_ROOT:-/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
 export OPTIONAL_NODE_FEATURES_DIR="${OPTIONAL_NODE_FEATURES_DIR:-/home/jas485/project_pi_co54/jas485/rsasa_i_graph_data}"
 export FEATURE_DATA="${FEATURE_DATA:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
 cd "$PROJECT_DIR"
@@ -23,22 +23,7 @@ if [[ -e "$EXPERIMENT_DIR/matrix.json" || -e "$EXPERIMENT_DIR/targets.txt" ]]; t
   echo "Experiment already exists; use a new EXPERIMENT_DIR or resume its individual stages." >&2
   exit 2
 fi
-# Shell glob preserves the exact target cohort without loading a Python environment.
-for path in "$SUBSET_DIR"/*.h5 "$SUBSET_DIR"/*.hdf5; do
-  [[ -f "$path" ]] || continue
-  name="${path##*/}"
-  echo "${name%.*}"
-done | sort -u > "$EXPERIMENT_DIR/targets.txt"
-COUNT=$(wc -l < "$EXPERIMENT_DIR/targets.txt")
-[[ "$COUNT" -gt 0 ]]
-DEPENDENCY=()
-if [[ "${SKIP_PREP:-0}" == 1 ]]; then
-  [[ -d "$EXTENSION_DATA" ]] || { echo "Prepared data missing: $EXTENSION_DATA" >&2; exit 2; }
-else
-  PREP=$(sbatch --parsable --array="1-$COUNT" --export=ALL,STAGE=data \
-    --output="$EXPERIMENT_DIR/logs/data_%A_%a.out" cluster/prepare_model_extensions.slurm)
-  DEPENDENCY+=(--dependency="afterok:${PREP%%;*}")
-fi
-MATRIX=$(sbatch --parsable "${DEPENDENCY[@]}" --export=ALL,STAGE=matrix \
-  --output="$EXPERIMENT_DIR/logs/matrix_%j.out" cluster/prepare_model_extensions.slurm)
-echo "Mode: $RUN_MODE; preparation: ${PREP:-reused}; matrix and GPU submission: $MATRIX"
+# Inspect the HDF5 inputs in the cluster environment before submitting arrays.
+PREFLIGHT=$(sbatch --parsable --export=ALL,STAGE=preflight \
+  --output="$EXPERIMENT_DIR/logs/preflight_%j.out" cluster/prepare_model_extensions.slurm)
+echo "Mode: $RUN_MODE; preflight and downstream submission: $PREFLIGHT"

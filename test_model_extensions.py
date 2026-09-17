@@ -166,8 +166,18 @@ def test_matrix_training_reload_and_comparison(tmp_path):
     assert (output / 'comparison/comparison.csv').is_file()
     run('compare_model_extensions.py', '--matrix', matrix_path, '--reference', 'seed_replicate_base', '--output', output / 'base_comparison', '--bootstrap', '100')
     full = tmp_path / 'full_runs'
+    # Prior manifests may include known empty targets; preserve every surviving
+    # target's assignment rather than reshuffling after excluding those targets.
+    prior = json.loads((output / 'target_splits.json').read_text())
+    prior['splits']['train']['paths'].append(str(data / 'empty.hdf5'))
+    prior_path = tmp_path / 'prior_with_empty.json'
+    prior_path.write_text(json.dumps(prior))
+    (tmp_path / 'targets.txt').write_text('1abc\n2abc\n3abc\n')
+    (tmp_path / 'excluded_targets.json').write_text(json.dumps({
+        'empty': {'reason': 'empty_source_subset', 'source_entry_count': 0}}))
     run('model_extension_experiments.py', 'prepare', '--data', data, '--output', full,
-        '--optional-node-features-dir', optional, '--prior-split', output / 'target_splits.json')
+        '--optional-node-features-dir', optional, '--prior-split', prior_path,
+        '--targets-file', tmp_path / 'targets.txt')
     full_matrix = json.loads((full / 'matrix.json').read_text())
     assert len(full_matrix['runs']) == 57
     assert {item['seed'] for item in full_matrix['runs']} == {7, 17, 27}
@@ -251,3 +261,42 @@ def test_training_cpu_allocation_must_be_positive():
     from model_extension_experiments import training_command
     with pytest.raises(ValueError, match='positive'):
         training_command({'argv': ['--num-workers', '7']}, 0)
+
+
+def test_empty_subset_fails_before_opening_external_inputs(tmp_path):
+    from types import SimpleNamespace
+    from prepare_model_extensions import prepare_target
+    source = tmp_path / 'source'; source.mkdir()
+    with h5py.File(source / '3gfk.hdf5', 'w') as f:
+        f.attrs['voronoi_subset_model_count'] = 0
+    output = tmp_path / 'prepared'; output.mkdir()
+    existing = output / '3gfk.hdf5'
+    existing.write_bytes(b'previous output must be preserved')
+    args = SimpleNamespace(data=source, output=output, apbs_dir=tmp_path / 'missing_apbs')
+    with pytest.raises(ValueError, match='zero graph entries'):
+        prepare_target(args, '3gfk')
+    audit = json.loads((output / '3gfk.audit.json').read_text())
+    assert audit['input_error'] == 'empty_source_subset'
+    assert audit['source_entry_count'] == audit['source_subset_model_count'] == 0
+    assert existing.read_bytes() == b'previous output must be preserved'
+    assert not list(output.glob('.3gfk.*'))
+
+
+
+def test_preflight_records_only_empty_target_exclusions(tmp_path):
+    from preflight_model_extensions import prepare_target_list
+    data = tmp_path / 'data'; data.mkdir()
+    for target in ('a', 'b', 'c', 'empty'):
+        with h5py.File(data / f'{target}.hdf5', 'w') as f:
+            if target != 'empty':
+                f.create_group('model')
+    included, excluded = prepare_target_list(data, tmp_path / 'output')
+    assert included == ['a', 'b', 'c']
+    assert list(excluded) == ['empty']
+    assert (tmp_path / 'output/targets.txt').read_text() == 'a\nb\nc\n'
+    with h5py.File(data / 'empty.hdf5') as f:
+        assert len(f) == 0
+    # A corrupt file is an error, not another permissible target exclusion.
+    (data / 'broken.hdf5').write_text('not hdf5')
+    with pytest.raises(OSError):
+        prepare_target_list(data, tmp_path / 'bad_output')

@@ -18,7 +18,25 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
-if [[ "$STAGE" == data ]]; then
+if [[ "$STAGE" == preflight ]]; then
+  python preflight_model_extensions.py --data "$SUBSET_DIR" --output "$EXPERIMENT_DIR"
+  COUNT=$(wc -l < "$EXPERIMENT_DIR/targets.txt")
+  DEPENDENCY=()
+  if [[ "${SKIP_PREP:-0}" == 1 ]]; then
+    [[ -d "$EXTENSION_DATA" ]] || { echo "Prepared data missing: $EXTENSION_DATA" >&2; exit 2; }
+  else
+    # Prove one nonempty target works before releasing the rest of the array.
+    FIRST=$(sbatch --parsable --array=1 --export=ALL,STAGE=data \
+      --output="$EXPERIMENT_DIR/logs/data_%A_%a.out" cluster/prepare_model_extensions.slurm)
+    REST=$(sbatch --parsable --array="2-$COUNT" --dependency="afterok:${FIRST%%;*}" --export=ALL,STAGE=data \
+      --output="$EXPERIMENT_DIR/logs/data_%A_%a.out" cluster/prepare_model_extensions.slurm)
+    DEPENDENCY+=(--dependency="afterok:${FIRST%%;*}:${REST%%;*}")
+    echo "Single-target preparation: $FIRST; remaining targets: $REST"
+  fi
+  MATRIX=$(sbatch --parsable "${DEPENDENCY[@]}" --export=ALL,STAGE=matrix \
+    --output="$EXPERIMENT_DIR/logs/matrix_%j.out" cluster/prepare_model_extensions.slurm)
+  echo "Matrix validation and GPU submission: $MATRIX"
+elif [[ "$STAGE" == data ]]; then
   TARGET=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$EXPERIMENT_DIR/targets.txt")
   EXTRA=()
   [[ "${ASSUME_AREA_WEIGHTED:-0}" == 1 ]] && EXTRA+=(--assume-area-weighted)

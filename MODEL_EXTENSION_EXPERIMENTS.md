@@ -86,7 +86,7 @@ On the cluster, from the repository:
 ```bash
 # Override defaults here if your stores are elsewhere.
 export APBS_DIR=/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data
-export ESM_ROOT=/nfs/roberts/pi/pi_co54/nb586/scratch_backup/SS_embeds
+export ESM_ROOT=/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds
 # Optional: preserve an existing target split.
 export PRIOR_SPLIT="$PWD/gate_run/voronoi_10pct_50epochs/target_splits.json"
 
@@ -115,7 +115,7 @@ bash cluster/submit_model_extensions.sh full
 
 Set `PROJECT_DIR` in your shell to the checkout used for these experiments; adjust these paths if you overrode quick-mode defaults. `SKIP_PREP=1` reads the existing prepared data without rewriting it. The full study still trains all three seeds, including seed 7, in its own run directories. With one seed, seed standard deviation is reported as NaN (unavailable), not zero; target bootstrap intervals do not measure seed variability.
 
-The submission chain is per-target CPU preparation → cohort/matrix validation → 57-task GPU array (19 in quick mode) → comparison. Arrays have **no `%N` concurrency throttle**. Slurm still applies cluster resource availability and account limits. Each GPU task requests one GPU, 8 CPUs, and 80 GB RAM. CPU preparation, matrix validation, and comparison each request 1 CPU and 32 GB because their per-job Python loops are serial. Preparation runs concurrently across target-array tasks. Training requests 8 CPUs and defaults to 7 DataLoader worker processes plus the main process; its launcher caps workers at the actual Slurm allocation minus one. OMP, MKL, OpenBLAS, NumExpr, and Accelerate thread counts are set to one per process to avoid nested thread pools. The CPU/worker allocation is printed in each training log. This enables CPU parallelism but does not guarantee every CPU stays busy: HDF5 reads, filesystem throughput, and GPU compute can limit utilization. Existing environment activation follows the current training scripts (`py311_env` plus repository `venv`). Dependencies include PyTorch, PyG, NumPy, h5py, SciPy, and Biopython.
+The submission chain is a one-CPU subset preflight → one nonempty target preparation → remaining per-target CPU preparation → cohort/matrix validation → 57-task GPU array (19 in quick mode) → comparison. Arrays have **no `%N` concurrency throttle**. Slurm still applies cluster resource availability and account limits. Each GPU task requests one GPU, 8 CPUs, and 80 GB RAM. CPU preparation, matrix validation, and comparison each request 1 CPU and 32 GB because their per-job Python loops are serial. Preparation runs concurrently across target-array tasks. Training requests 8 CPUs and defaults to 7 DataLoader worker processes plus the main process; its launcher caps workers at the actual Slurm allocation minus one. OMP, MKL, OpenBLAS, NumExpr, and Accelerate thread counts are set to one per process to avoid nested thread pools. The CPU/worker allocation is printed in each training log. This enables CPU parallelism but does not guarantee every CPU stays busy: HDF5 reads, filesystem throughput, and GPU compute can limit utilization. Existing environment activation follows the current training scripts (`py311_env` plus repository `venv`). Dependencies include PyTorch, PyG, NumPy, h5py, SciPy, and Biopython.
 
 Paths also configurable through `PROJECT_DIR`, `SUBSET_DIR`, `FEATURE_DATA`, `PDB_ROOT`, `EXTENSION_DATA`, `EXPERIMENT_DIR`, and `OPTIONAL_NODE_FEATURES_DIR`. Use a dedicated prepared-data directory and a new experiment directory. Do not regenerate its HDF5 inputs while training jobs are running.
 
@@ -127,7 +127,7 @@ python prepare_model_extensions.py --target 1acb \
   --pdb-root "$PDB_ROOT" --apbs-dir "$APBS_DIR" --esm-root "$ESM_ROOT"
 ```
 
-The wrapper writes `EXPERIMENT_DIR/targets.txt`. Once preprocessing succeeds, `matrix.json` records every command, graph key, seed, configuration, and cohort count. For a failed GPU task, rerun just its one-based matrix index:
+The preflight writes `EXPERIMENT_DIR/targets.txt` for nonempty subset files and records all empty files in `excluded_targets.json`. These empty files supply no graphs to any variant. Unreadable files fail preflight; nonempty targets with no successfully prepared graphs still fail preparation. Prior target splits retain surviving target assignments and can omit only targets explicitly recorded as empty by preflight. The first nonempty target must prepare successfully before the rest of the CPU array is released. This dependency is a validation gate, not an array concurrency cap. Once preprocessing succeeds, `matrix.json` records every command, graph key, seed, configuration, and cohort count. For a failed GPU task, rerun just its one-based matrix index:
 
 ```bash
 sbatch --array=TASK_ID \

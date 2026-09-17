@@ -41,7 +41,14 @@ def prepare(args):
         edge_features=(BASE_EDGES + ',' + APBS + ',apbs_pair_area_product').split(','),
         require_target=True, skip_invalid_files=False, optional_node_features_dir=args.optional_node_features_dir,
         use_esm=True, require_pos=True)
+    exclusions = {}
     if args.targets_file:
+        exclusions_path = args.targets_file.parent / 'excluded_targets.json'
+        if exclusions_path.exists():
+            exclusions = json.loads(exclusions_path.read_text())
+            if any(record.get('reason') != 'empty_source_subset' or record.get('source_entry_count') != 0
+                   for record in exclusions.values()):
+                raise ValueError('Invalid empty-target exclusion record')
         requested = {line.strip() for line in args.targets_file.read_text().splitlines() if line.strip()}
         if requested != {path.stem for path in dataset.paths}:
             raise ValueError('Prepared data targets differ from the requested subset; use a dedicated output directory')
@@ -67,7 +74,14 @@ def prepare(args):
     if args.prior_split:
         old = json.loads(args.prior_split.read_text())
         paths_by_target = {p.stem: p for p in dataset.paths}
-        split_paths = {name: [paths_by_target[Path(p).stem] for p in old['splits'][name]['paths']]
+        prior_targets = [Path(p).stem for split in old['splits'].values() for p in split['paths']]
+        if len(prior_targets) != len(set(prior_targets)):
+            raise ValueError('Prior split contains repeated targets')
+        unknown = set(prior_targets) - set(paths_by_target) - set(exclusions)
+        if unknown:
+            raise ValueError(f'Prior split has unavailable targets without empty-subset exclusions: {sorted(unknown)}')
+        split_paths = {name: [paths_by_target[Path(p).stem] for p in old['splits'][name]['paths']
+                             if Path(p).stem not in exclusions]
                        for name in ('train', 'val', 'test')}
         targets = [p.stem for paths in split_paths.values() for p in paths]
         if len(set(targets)) != len(targets) or set(targets) != set(paths_by_target):
@@ -112,7 +126,7 @@ def prepare(args):
             for flag, weight in zip(('node', 'edge-attr', 'edge-presence', 'target'), weights):
                 command += [f'--{flag}-weight', weight]
             runs.append(dict(config=config, seed=seed, output=str(output.resolve()), argv=command))
-    matrix_path.write_text(json.dumps({'runs': runs, 'cohort': audits,
+    matrix_path.write_text(json.dumps({'runs': runs, 'cohort': audits, 'excluded_targets': exclusions,
         'primary_metric': 'target-macro DockQ MSE', 'split': str(split_path.resolve()),
         'cohort_keys': sorted([list(key) for key in actual])}, indent=2) + '\n')
     print(f'{len(runs)} runs written to {matrix_path}; {len(dataset)} graphs; cohort attrition: {audits}')

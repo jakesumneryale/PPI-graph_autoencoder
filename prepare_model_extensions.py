@@ -166,12 +166,25 @@ def prepare_target(args, target):
     try:
         with ExitStack() as stack:
             original = stack.enter_context(h5py.File(source))
+            audit['source_entry_count'] = len(original)
+            audit['source_subset_model_count'] = (
+                int(original.attrs['voronoi_subset_model_count'])
+                if 'voronoi_subset_model_count' in original.attrs else None)
+            if not len(original):
+                audit['input_error'] = 'empty_source_subset'
+                audit_path = args.output / f'{target}.audit.json'
+                audit_path.write_text(json.dumps(audit, indent=2) + '\n')
+                raise ValueError(
+                    f'{target}: source subset {source} has zero graph entries. '
+                    'No APBS or ESM checks ran. Check subset_manifest.csv and '
+                    f'the upstream Voronoi audit before rebuilding the subset; see {audit_path}')
             apbs = stack.enter_context(h5py.File(apbs_path))
             output = stack.enter_context(h5py.File(temporary, 'w'))
             latest = (stack.enter_context(h5py.File(resolve_target_graph_hdf5(args.feature_data, target)))
                       if args.feature_data else original)
             weighted = bool(apbs.attrs.get('residue_statistics_area_weighted', False))
-            audit['area_weighting'] = 'recorded' if weighted else 'user_asserted'
+            audit['area_weighting'] = ('recorded' if weighted else
+                'user_asserted' if args.assume_area_weighted else 'unverified_at_file_level')
             audit['apbs_settings'] = {k: str(v) for k, v in apbs.attrs.items()}
             for name in sorted(original):
                 graph = original[name]
@@ -253,7 +266,7 @@ def main():
     p.add_argument('--target', required=True)
     p.add_argument('--pdb-root', type=Path, required=True)
     p.add_argument('--apbs-dir', type=Path, required=True)
-    p.add_argument('--esm-root', type=Path, default=Path('/nfs/roberts/pi/pi_co54/nb586/scratch_backup/SS_embeds'))
+    p.add_argument('--esm-root', type=Path, default=Path('/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds'))
     p.add_argument('--fasta-template', default='{target}_all.fasta')
     p.add_argument('--embedding-template', default='{target}.{chain}.pt')
     p.add_argument('--esm-layer', type=int, default=33)
