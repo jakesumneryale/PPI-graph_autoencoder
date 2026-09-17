@@ -9,6 +9,12 @@ apbs_run/
 apbs_env/
 io.mc
 gate_run/node_feature_ablation_lr5e-6/
+# Downloaded seed-replicate run data
+/gate_results/seed_replicates/
+/gate_results/seed_replicates.zip
+/gate_run/seed_replicates/
+/gate_run/seed_replicates_analysis/
+/gate_run/seed_replicates.zip
 apbs_analysis/approach_movie.py
 
 # Local Python 3.13 venv for the analysis notebooks
