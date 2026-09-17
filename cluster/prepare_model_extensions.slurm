@@ -18,6 +18,7 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
+echo "Stage: $STAGE; 1 main process, 0 workers, numerical-library threads=1; Slurm CPUs=${SLURM_CPUS_PER_TASK:-1}; APBS_ENABLED=${APBS_ENABLED:-1}"
 if [[ "$STAGE" == preflight ]]; then
   python preflight_model_extensions.py --data "$SUBSET_DIR" --output "$EXPERIMENT_DIR"
   COUNT=$(wc -l < "$EXPERIMENT_DIR/targets.txt")
@@ -39,12 +40,17 @@ if [[ "$STAGE" == preflight ]]; then
 elif [[ "$STAGE" == data ]]; then
   TARGET=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$EXPERIMENT_DIR/targets.txt")
   EXTRA=()
-  [[ "${ASSUME_AREA_WEIGHTED:-0}" == 1 ]] && EXTRA+=(--assume-area-weighted)
+  if [[ "${APBS_ENABLED:-1}" == 0 ]]; then
+    EXTRA+=(--without-apbs)
+  else
+    EXTRA+=(--apbs-dir "$APBS_DIR")
+    [[ "${ASSUME_AREA_WEIGHTED:-0}" == 1 ]] && EXTRA+=(--assume-area-weighted)
+  fi
   [[ -n "${FEATURE_DATA:-}" ]] && EXTRA+=(--feature-data "$FEATURE_DATA")
   [[ -n "${EMBEDDING_TEMPLATE:-}" ]] && EXTRA+=(--embedding-template "$EMBEDDING_TEMPLATE")
   [[ -n "${FASTA_TEMPLATE:-}" ]] && EXTRA+=(--fasta-template "$FASTA_TEMPLATE")
   python prepare_model_extensions.py --target "$TARGET" --data "$SUBSET_DIR" \
-    --output "$EXTENSION_DATA" --apbs-dir "$APBS_DIR" --pdb-root "$PDB_ROOT" \
+    --output "$EXTENSION_DATA" --pdb-root "$PDB_ROOT" \
     --esm-root "$ESM_ROOT" "${EXTRA[@]}"
 elif [[ "$STAGE" == matrix ]]; then
   case "${RUN_MODE:-full}" in
@@ -53,6 +59,7 @@ elif [[ "$STAGE" == matrix ]]; then
     *) echo "Unknown RUN_MODE" >&2; exit 2 ;;
   esac
   EXTRA=(--seeds "${SEEDS[@]}" --epochs "${EPOCHS:-50}")
+  [[ "${APBS_ENABLED:-1}" == 0 ]] && EXTRA+=(--without-apbs)
   [[ -n "${PRIOR_SPLIT:-}" ]] && EXTRA+=(--prior-split "$PRIOR_SPLIT")
   python model_extension_experiments.py prepare --data "$EXTENSION_DATA" \
     --output "$EXPERIMENT_DIR" --targets-file "$EXPERIMENT_DIR/targets.txt" --optional-node-features-dir "$OPTIONAL_NODE_FEATURES_DIR" "${EXTRA[@]}"

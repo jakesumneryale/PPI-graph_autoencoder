@@ -251,6 +251,59 @@ def test_preparer_preserves_sources_and_aligns_rows(tmp_path):
         prepare_target(args, target)
     assert sha256(args.output / '1abc.hdf5') == prepared_digest
 
+    # APBS-free preparation must work with no APBS path at all and remove any
+    # stale APBS columns copied from an already-enriched source fixture.
+    args.without_apbs = True
+    args.apbs_dir = None
+    args.output = tmp_path / 'without_apbs'
+    prepare_target(args, target)
+    audit = json.loads((args.output / '1abc.audit.json').read_text())
+    assert audit['apbs_enabled'] is False and audit['apbs_path'] is None
+    assert audit['area_weighting'] == 'disabled'
+    with h5py.File(args.output / '1abc.hdf5') as f:
+        assert not f.attrs['apbs_enabled']
+        assert not any(k.startswith('apbs_') for k in f[name]['edge_features'])
+        assert f[name]['esm2'].shape == (4, 8)
+    assert sha256(source_path) == before
+
+
+def test_without_apbs_matrix_needs_no_apbs_columns_and_has_no_duplicates(tmp_path):
+    data = tmp_path / 'data'; data.mkdir()
+    optional = tmp_path / 'optional'; optional.mkdir()
+    for target in ('1abc', '2abc', '3abc'):
+        write_fixture(data / f'{target}.hdf5')
+        with h5py.File(data / f'{target}.hdf5', 'a') as f:
+            for g in f.values():
+                for key in list(g['edge_features']):
+                    if key.startswith('apbs_'):
+                        del g['edge_features'][key]
+        names = ['complex.0_0_0', 'complex.1_0_0']
+        (data / f'{target}.audit.json').write_text(json.dumps(
+            {'accepted': names, 'rejected': {}, 'apbs_enabled': False}))
+        (optional / f'{target}_avg_rSASA_i.csv').write_text(
+            'Decoy,avg_rsasa_i\n' + '\n'.join(f'{name},0.3' for name in names))
+    command = [sys.executable, 'model_extension_experiments.py', 'prepare', '--without-apbs',
+        '--data', str(data), '--optional-node-features-dir', str(optional), '--seeds', '7',
+        '--epochs', '1', '--num-workers', '0', '--device', 'cpu']
+    result = subprocess.run(command + ['--output', str(tmp_path/'runs')], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    matrix = json.loads((tmp_path/'runs/matrix.json').read_text())
+    assert matrix['apbs_enabled'] is False and len(matrix['runs']) == 11
+    signatures = set()
+    for run in matrix['runs']:
+        c, argv = run['config'], run['argv']
+        assert c['apbs'] == 'none'
+        assert 'apbs_' not in argv[argv.index('--edge-features')+1]
+        assert argv[argv.index('--loss-weight-mode')+1] == 'fixed'
+        signatures.add((c['architecture'],c['pooling'],c['esm'],c['objective'],
+                        argv[argv.index('--node-features')+1],argv[argv.index('--edge-features')+1]))
+    assert len(signatures) == 11
+    # APBS-filtered preparation cannot masquerade as the new common cohort.
+    path = data/'1abc.audit.json'; audit = json.loads(path.read_text()); audit.pop('apbs_enabled')
+    path.write_text(json.dumps(audit))
+    result = subprocess.run(command + ['--output', str(tmp_path/'bad')], capture_output=True, text=True)
+    assert result.returncode != 0 and 'prepare with --without-apbs' in result.stderr
+
 
 def test_egnn_coincident_coordinates_have_finite_gradients():
     data = graph(); data.pos.zero_()

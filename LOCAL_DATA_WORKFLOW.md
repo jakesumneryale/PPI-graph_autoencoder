@@ -142,6 +142,35 @@ Use a fresh local experiment directory for each new matrix. Batch size 2 is an i
 
 The local preparation and example training above use one CPU process. Enable loader workers explicitly only when allocating additional CPUs. Only the cluster launchers request Slurm resources.
 
+Update from downloaded-bundle testing: the host driver and RTX 4090 work. The
+restricted coding-session sandbox hides `/dev/nvidia*`; approved host execution
+successfully ran PyTorch 2.10.0+cu130 CUDA forward/backward. Use host GPU access
+for coding-agent CUDA jobs. A sandbox-only failure is not evidence that the
+driver needs reinstalling.
+
+For a full read-only PDB/graph/ESM/APBS/rSASA alignment audit:
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python validate_extension_bundle.py \
+  --bundle /scratch/ppi_extension_data/full \
+  --output local_data_audit/downloaded_bundle/alignment
+```
+
+For sequential two-epoch execution checks of all 19 configurations on nine
+real graphs, including checkpoint reload and comparison export:
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python smoke_test_model_extensions.py \
+  --bundle /scratch/ppi_extension_data/full \
+  --output local_data_audit/downloaded_bundle/smoke19_cuda --device cuda
+```
+
+Use a fresh output directory if that smoke test already exists. This test
+explicitly uses stored APBS means only for numerical software checks; it does
+not attest to unmarked area weighting. Its outputs are marked SOFTWARE TEST
+ONLY and its metrics must not be interpreted as accuracy comparisons. Normal
+preparation still enforces APBS provenance.
+
 
 ## Audit all existing local graph files separately
 

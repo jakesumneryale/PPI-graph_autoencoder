@@ -16,21 +16,22 @@ BASE_EDGES = 'interface_edges,ca_dist,voronoi_contact_area,voronoi_contact_missi
 APBS = 'apbs_pair_mean,apbs_pair_absdiff,apbs_pair_product,apbs_pair_missing'
 
 
-def variants():
+def variants(without_apbs=False):
     result = [dict(name='seed_replicate_base', architecture='gat', apbs='none',
                    pooling='all', esm=False, objective='ae')]
-    for apbs, pooling, esm in itertools.product(('none', 'plain', 'area'), ('all', 'interface'), (False, True)):
+    for apbs, pooling, esm in itertools.product(('none',) if without_apbs else ('none', 'plain', 'area'), ('all', 'interface'), (False, True)):
         label = 'baseline' if (apbs, pooling, esm) == ('none', 'all', False) else f'gat_{apbs}_{pooling}_esm{int(esm)}'
         result.append(dict(name=label, architecture='gat', apbs=apbs, pooling=pooling, esm=esm, objective='ae'))
     for architecture, objective in (('egnn', 'ae'), ('egnn', 'supervised'), ('gat', 'supervised')):
         for combined in (False, True):
             result.append(dict(name=f'{architecture}_{objective}_{"combined" if combined else "baseline"}',
-                architecture=architecture, objective=objective, apbs='plain' if combined else 'none',
+                architecture=architecture, objective=objective, apbs='plain' if combined and not without_apbs else 'none',
                 pooling='interface' if combined else 'all', esm=combined))
     return result
 
 
 def prepare(args):
+    without_apbs = getattr(args, 'without_apbs', False)
     if len(set(args.seeds)) != len(args.seeds):
         raise ValueError('Seed list must not contain duplicates')
     args.output.mkdir(parents=True, exist_ok=True)
@@ -38,7 +39,7 @@ def prepare(args):
     if matrix_path.exists():
         raise FileExistsError(f'{matrix_path} already exists; use a new experiment directory')
     dataset = ProteinGraphHDF5Dataset(args.data, node_features=BASE_NODES.split(','),
-        edge_features=(BASE_EDGES + ',' + APBS + ',apbs_pair_area_product').split(','),
+        edge_features=(BASE_EDGES if without_apbs else BASE_EDGES + ',' + APBS + ',apbs_pair_area_product').split(','),
         require_target=True, skip_invalid_files=False, optional_node_features_dir=args.optional_node_features_dir,
         use_esm=True, require_pos=True)
     exclusions = {}
@@ -58,6 +59,8 @@ def prepare(args):
     for path in dataset.paths:
         audit_path = args.data / f'{path.stem}.audit.json'
         audit = json.loads(audit_path.read_text())
+        if without_apbs and audit.get('apbs_enabled') is not False:
+            raise ValueError(f'{audit_path}: prepare with --without-apbs so APBS availability does not filter the cohort')
         audits[path.stem] = {'accepted': len(audit['accepted']), 'rejected': len(audit['rejected'])}
         expected.update((path.stem, name) for name in audit['accepted'])
     actual = {(key.path.stem, key.group_name) for key in dataset.samples}
@@ -101,7 +104,7 @@ def prepare(args):
         '--loss-weight-mode', 'fixed', '--checkpoint-metric', 'target_mse',
         '--validation-only-during-training', '--residual_connections']
     runs = []
-    for config in variants():
+    for config in variants(without_apbs):
         for seed in args.seeds:
             original_base = config['name'] == 'seed_replicate_base'
             nodes = 'aa_type,chain,interface_nodes,rsasa_i' if original_base else BASE_NODES
@@ -127,6 +130,7 @@ def prepare(args):
                 command += [f'--{flag}-weight', weight]
             runs.append(dict(config=config, seed=seed, output=str(output.resolve()), argv=command))
     matrix_path.write_text(json.dumps({'runs': runs, 'cohort': audits, 'excluded_targets': exclusions,
+        'apbs_enabled': not without_apbs,
         'primary_metric': 'target-macro DockQ MSE', 'split': str(split_path.resolve()),
         'cohort_keys': sorted([list(key) for key in actual])}, indent=2) + '\n')
     print(f'{len(runs)} runs written to {matrix_path}; {len(dataset)} graphs; cohort attrition: {audits}')
@@ -154,6 +158,7 @@ def main():
     sub = p.add_subparsers(dest='action', required=True)
     make = sub.add_parser('prepare')
     make.add_argument('--data', type=Path, required=True)
+    make.add_argument('--without-apbs', action='store_true', help='Create the 11-configuration non-APBS matrix')
     make.add_argument('--output', type=Path, required=True)
     make.add_argument('--optional-node-features-dir', type=Path, required=True)
     make.add_argument('--targets-file', type=Path)

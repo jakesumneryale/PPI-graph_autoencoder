@@ -8,10 +8,16 @@ case "$RUN_MODE" in
   *) echo "Usage: bash cluster/submit_model_extensions.sh [quick|full]" >&2; exit 2 ;;
 esac
 export EPOCHS="${EPOCHS:-50}"
+export APBS_ENABLED="${APBS_ENABLED:-1}"
+case "$APBS_ENABLED" in
+  1) SUFFIX="" ;;
+  0) SUFFIX="_no_apbs" ;;
+  *) echo "APBS_ENABLED must be 0 or 1" >&2; exit 2 ;;
+esac
 export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 export SUBSET_DIR="${SUBSET_DIR:-$PROJECT_DIR/voronoi_dataset_audit/subset_hdf5}"
-export EXTENSION_DATA="${EXTENSION_DATA:-$PROJECT_DIR/extension_data_10pct_$RUN_MODE}"
-export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/model_extensions_10pct_$RUN_MODE}"
+export EXTENSION_DATA="${EXTENSION_DATA:-$PROJECT_DIR/extension_data_10pct_${RUN_MODE}${SUFFIX}}"
+export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/model_extensions_10pct_${RUN_MODE}${SUFFIX}}"
 export APBS_DIR="${APBS_DIR:-/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data}"
 export PDB_ROOT="${PDB_ROOT:-/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data}"
 export ESM_ROOT="${ESM_ROOT:-/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
@@ -26,4 +32,5 @@ fi
 # Inspect the HDF5 inputs in the cluster environment before submitting arrays.
 PREFLIGHT=$(sbatch --parsable --export=ALL,STAGE=preflight \
   --output="$EXPERIMENT_DIR/logs/preflight_%j.out" cluster/prepare_model_extensions.slurm)
-echo "Mode: $RUN_MODE; preflight and downstream submission: $PREFLIGHT"
+echo "Mode: $RUN_MODE; APBS enabled: $APBS_ENABLED; preflight and downstream submission: $PREFLIGHT"
+echo "Outputs: $EXPERIMENT_DIR; logs: $EXPERIMENT_DIR/logs"

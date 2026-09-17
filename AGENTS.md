@@ -34,3 +34,10 @@ from the requested allocation or a script's name.
 - Local transfer destination: /scratch/ppi_extension_data/full. Verify endpoint
   path permissions and actual CUDA access; do not claim GPU validation from
   CPU-only tests.
+- This session's filesystem sandbox hides /dev/nvidia*. If CUDA/nvidia-smi
+  fails inside it, check through approved host execution before diagnosing a
+  driver problem. Host execution verified RTX 4090 and PyTorch CUDA successfully;
+  GPU jobs need that execution path, not a driver reinstall.
+- Current experiment decision: defer APBS. Use the APBS-free preparation and
+  11-configuration launcher for the next cluster run; do not require APBS
+  regeneration or area-weighting attestation for that run.

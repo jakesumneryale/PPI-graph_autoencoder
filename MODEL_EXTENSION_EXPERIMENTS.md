@@ -1,5 +1,69 @@
 # APBS, interface pooling, ESM2, and EGNN experiments
 
+## Current launch: omit APBS
+
+The next experiment defers APBS entirely. After syncing this code to Bouchet,
+run from the cluster repository:
+
+```bash
+bash cluster/submit_model_extensions_no_apbs.sh quick
+```
+
+This submits preflight → one-target preparation → remaining preparation tasks
+→ full matrix validation → **11 GPU jobs (seed 7, 50 epochs)** → comparisons.
+For all three seeds (7, 17, 27), use `full` instead: **33 GPU jobs**.
+The APBS-on suite remains available separately; removing its duplicate APBS
+arms leaves 11 distinct configurations, rather than 19.
+
+| Configurations | Count |
+| --- | ---: |
+| Original seed-replicate base GAT control | 1 |
+| Full-feature GAT: all/interface pooling × ESM off/on | 4 |
+| EGNN autoencoder: baseline / ESM + interface pooling | 2 |
+| EGNN supervised: baseline / ESM + interface pooling | 2 |
+| GAT supervised: baseline / ESM + interface pooling | 2 |
+
+Voronoi area/mask and interface-node degree stay in every full-feature arm;
+Voronoi area remains log1p-transformed and standardized from training targets.
+ESM and CA coordinates remain available for the relevant models. The matrix
+uses **fixed** loss weights (node 1, edge 1, link 0.1, DockQ 1; supervised arms
+only use DockQ). It does not use the old seed-replicate adaptive weighting.
+
+The launcher reads the original cluster 10% subset, not `local_transfer_full`:
+APBS availability therefore does not remove the 180 graphs excluded from the
+transfer bundle. All remaining PDB/ESM/graph validation still applies and is
+recorded per target. The existing shared seed-replicate target split is reused:
+90 train / 10 validation / 25 test targets among the 125 nonempty targets.
+These are new subset runs, so old full-dataset prediction metrics are not a
+paired graph-level comparison with this experiment.
+
+Default quick outputs:
+
+```text
+extension_data_10pct_quick_no_apbs/
+gate_run/model_extensions_10pct_quick_no_apbs/
+gate_run/model_extensions_10pct_quick_no_apbs/logs/
+```
+
+Logs: `preflight_JOBID.out`, `data_ARRAYID_TASK.out`, `matrix_JOBID.out`,
+`train_ARRAYID_TASK.out`, and `compare_JOBID.out`. Existing output matrices
+are protected; choose a new `EXPERIMENT_DIR` for a fresh experiment. Set
+`SKIP_PREP=1` with `EXTENSION_DATA` pointing to validated **APBS-free** prepared
+data to reuse it. An old APBS-filtered preparation audit is rejected by the
+new matrix mode. The wrapper requires the shared split at
+`gate_run/seed_replicates/shared_target_splits.json`; override `PRIOR_SPLIT`
+if it is elsewhere on the cluster.
+
+Preparation, validation, and comparison request one CPU each. Training requests
+eight CPUs and runs seven loader workers plus the main process, with numerical
+threads limited to one per process. There is no Slurm array concurrency cap.
+
+For manual/local use, both Python preparation commands accept `--without-apbs`.
+In that mode, `prepare_model_extensions.py` does not require or open an APBS
+directory and removes any stale APBS columns from copied graphs.
+
+The remaining sections document the optional APBS-on experiment.
+
 The control is the **current full-feature residual four-layer GAT**: amino-acid identity, chain, interface flag, rSASA_i, interface-node degree, CA distance, Voronoi contact area, and its missing mask. Voronoi and the new APBS quantities are encoder inputs only; edge reconstruction still targets interface_edges and ca_dist. This matches the `full` arm of the current seed-replicate scripts. Those scripts and their running jobs are unchanged.
 
 ## 1. Prepare the same existing 10% subset

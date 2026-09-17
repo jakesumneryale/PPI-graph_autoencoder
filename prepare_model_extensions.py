@@ -197,9 +197,13 @@ def prepare_target(args, target):
     if source.resolve() == destination.resolve():
         raise ValueError('Output must be separate from the source subset')
     args.output.mkdir(parents=True, exist_ok=True)
-    apbs_path = args.apbs_dir / f'{target}_apbs_surface.hdf5'
+    apbs_enabled = not getattr(args, 'without_apbs', False)
+    if apbs_enabled and args.apbs_dir is None:
+        raise ValueError('--apbs-dir is required unless --without-apbs is set')
+    apbs_path = args.apbs_dir / f'{target}_apbs_surface.hdf5' if apbs_enabled else None
     audit = {'target': target, 'source': str(source), 'source_sha256': sha256(source),
-             'apbs_path': str(apbs_path), 'accepted': [], 'rejected': {}, 'models': {}}
+             'apbs_path': str(apbs_path) if apbs_path else None, 'apbs_enabled': apbs_enabled,
+             'accepted': [], 'rejected': {}, 'models': {}}
     fd, temporary = tempfile.mkstemp(prefix=f'.{target}.', suffix='.hdf5', dir=args.output)
     os.close(fd)
     try:
@@ -217,14 +221,14 @@ def prepare_target(args, target):
                     f'{target}: source subset {source} has zero graph entries. '
                     'No APBS or ESM checks ran. Check subset_manifest.csv and '
                     f'the upstream Voronoi audit before rebuilding the subset; see {audit_path}')
-            apbs = stack.enter_context(h5py.File(apbs_path))
+            apbs = stack.enter_context(h5py.File(apbs_path)) if apbs_enabled else None
             output = stack.enter_context(h5py.File(temporary, 'w'))
             latest = (stack.enter_context(h5py.File(resolve_target_graph_hdf5(args.feature_data, target)))
                       if args.feature_data else original)
-            weighted = bool(apbs.attrs.get('residue_statistics_area_weighted', False))
-            audit['area_weighting'] = ('recorded' if weighted else
+            weighted = bool(apbs.attrs.get('residue_statistics_area_weighted', False)) if apbs_enabled else False
+            audit['area_weighting'] = ('disabled' if not apbs_enabled else 'recorded' if weighted else
                 'user_asserted' if args.assume_area_weighted else 'unverified_at_file_level')
-            audit['apbs_settings'] = {k: str(v) for k, v in apbs.attrs.items()}
+            audit['apbs_settings'] = {k: str(v) for k, v in apbs.attrs.items()} if apbs_enabled else {}
             for name in sorted(original):
                 graph = original[name]
                 try:
@@ -249,18 +253,26 @@ def prepare_target(args, target):
                         raise ValueError('Nonfinite DockQ')
                     embeddings, provenance = load_embeddings(args.esm_root, target, name, residues,
                         args.fasta_template, args.embedding_template, args.esm_layer)
-                    apbs_name = name.removesuffix('_corrected')
-                    if apbs_name not in apbs:
-                        apbs_name += '_corrected'
-                    apbs_group = apbs[apbs_name]
-                    if not (weighted or apbs_group.attrs.get('residue_statistics_area_weighted', False) or args.assume_area_weighted):
-                        raise ValueError('APBS area-weighting provenance absent: validate/migrate the store, or explicitly use --assume-area-weighted')
-                    units = apbs_group.attrs.get('potential_units', apbs.attrs.get('potential_units'))
-                    if units != 'kT/e':
-                        raise ValueError(f'Expected APBS potential units kT/e, got {units!r}')
-                    features = apbs_features(apbs_group, graph, residues)
+                    features = {}
+                    group_weighted = False
+                    if apbs_enabled:
+                        apbs_name = name.removesuffix('_corrected')
+                        if apbs_name not in apbs:
+                            apbs_name += '_corrected'
+                        apbs_group = apbs[apbs_name]
+                        group_weighted = bool(apbs_group.attrs.get('residue_statistics_area_weighted', False))
+                        if not (weighted or group_weighted or args.assume_area_weighted):
+                            raise ValueError('APBS area-weighting provenance absent: validate/migrate the store, or explicitly use --assume-area-weighted')
+                        units = apbs_group.attrs.get('potential_units', apbs.attrs.get('potential_units'))
+                        if units != 'kT/e':
+                            raise ValueError(f'Expected APBS potential units kT/e, got {units!r}')
+                        features = apbs_features(apbs_group, graph, residues)
                     graph.file.copy(graph, output, name=name)
                     copied = output[name]
+                    if not apbs_enabled:
+                        for key in list(copied['edge_features']):
+                            if key.startswith('apbs_'):
+                                del copied['edge_features'][key]
                     for key, values in (('pos', pos), ('esm2', embeddings)):
                         if key in copied:
                             del copied[key]
@@ -279,13 +291,15 @@ def prepare_target(args, target):
                     nodes.create_dataset('interface_node_degree', data=degree)
                     audit['accepted'].append(name)
                     audit['models'][name] = {'pdb_sha256': sha256(pdb), 'esm': provenance,
-                        'apbs_missing_edges': int(features['apbs_pair_missing'].sum()),
-                        'apbs_area_weighting': 'recorded' if weighted or apbs_group.attrs.get('residue_statistics_area_weighted', False) else 'user_asserted'}
+                        'apbs_missing_edges': int(features['apbs_pair_missing'].sum()) if apbs_enabled else None,
+                        'apbs_area_weighting': ('disabled' if not apbs_enabled else
+                            'recorded' if weighted or group_weighted else 'user_asserted')}
                 except (KeyError, ValueError, FileNotFoundError, OSError) as exc:
                     if name in output:
                         del output[name]
                     audit['rejected'][name] = str(exc)
             output.attrs['extension_schema'] = 1
+            output.attrs['apbs_enabled'] = apbs_enabled
         audit_path = args.output / f'{target}.audit.json'
         audit_path.write_text(json.dumps(audit, indent=2) + '\n')
         if not audit['accepted']:
@@ -309,7 +323,8 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--target', required=True)
     p.add_argument('--pdb-root', type=Path, required=True)
-    p.add_argument('--apbs-dir', type=Path, required=True)
+    p.add_argument('--apbs-dir', type=Path)
+    p.add_argument('--without-apbs', action='store_true', help='Prepare coordinates, ESM and interface degree without opening APBS stores')
     p.add_argument('--esm-root', type=Path, default=Path('/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds'))
     p.add_argument('--fasta-template', default='{target}_all.fasta')
     p.add_argument('--embedding-template', default='{target}.{chain}.pt')
