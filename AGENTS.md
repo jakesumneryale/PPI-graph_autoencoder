@@ -20,6 +20,15 @@ from the requested allocation or a script's name.
 
 # Local prototyping and data reuse
 
+## Analysis plot preferences
+
+- Use LaTeX Computer Modern text and math for analysis figures.
+- Do not add plot titles or figure suptitles; explain the plot in notebook prose.
+- Use clearly labeled axes with units, large slide-readable text, and visible
+  borders on all four sides. Prefer approximately 20–24 pt axis labels and
+  16–18 pt tick/legend text, with enough figure space to prevent overlap.
+
+
 - Prefer local preflight and training on the existing 10% subset before cluster
   dispatch. Audit all local graph files separately; do not expand training to
   the full dataset merely because it is present.

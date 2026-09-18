@@ -20,6 +20,8 @@ try:
 except ImportError:  # pragma: no cover - compatibility fallback for older PyG.
     batched_negative_sampling = None
 
+from dockq_objectives import fit_range_weights, read_training_labels, weighted_dockq_mse, prediction_report
+
 from GATE_model import GraphAttentionAutoencoder
 from EGNN_model import build_graph_model
 from evaluate_gate_reconstruction import evaluate_checkpoint, write_csv
@@ -427,9 +429,9 @@ def build_lr_scheduler(optimizer, args, steps_per_epoch: int):
 
 def resolve_loss_weights(args) -> dict[str, float]:
     return {
-        "node_mse": args.node_weight,
-        "edge_attr_mse": args.edge_attr_weight,
-        "edge_presence_bce": args.edge_presence_weight,
+        "node_mse": args.node_weight * getattr(args, "reconstruction_lambda", 1.0),
+        "edge_attr_mse": args.edge_attr_weight * getattr(args, "reconstruction_lambda", 1.0),
+        "edge_presence_bce": args.edge_presence_weight * getattr(args, "reconstruction_lambda", 1.0),
         "target_mse": args.target_weight,
     }
 
@@ -475,7 +477,9 @@ def compute_gate_loss(model, batch, output, args, balancer=None, update_balancer
         losses["edge_presence_bce"] = output["node_recon"].new_tensor(0.0)
 
     if getattr(batch, "y", None) is not None and output["quality_pred"] is not None:
-        losses["target_mse"] = F.mse_loss(output["quality_pred"], batch.y.float().view(-1))
+        losses["target_mse"] = weighted_dockq_mse(
+            output["quality_pred"], batch.y.float(),
+            getattr(args, "dockq_bin_weights", None) if update_balancer else None)
     else:
         losses["target_mse"] = output["node_recon"].new_tensor(0.0)
 
@@ -495,6 +499,13 @@ def compute_gate_loss(model, batch, output, args, balancer=None, update_balancer
     for name in LOSS_TERM_NAMES:
         metrics[f"weight_{name}"] = weights[name]
         metrics[f"weighted_{name}"] = weights[name] * metrics[name]
+    if getattr(args, "_log_objective_gradients", False):
+        # Shared latent-node representation, not decoder parameter gradients.
+        z = output["node_embeddings"]
+        for name, objective in [("dockq", weights["target_mse"] * losses["target_mse"]),
+                                ("structure", sum(weights[k] * losses[k] for k in LOSS_TERM_NAMES if k != "target_mse"))]:
+            grad = torch.autograd.grad(objective, z, retain_graph=True, allow_unused=True)[0]
+            metrics["gradient_" + name] = 0.0 if grad is None else float(grad.detach().norm().cpu())
     return total, metrics
 
 
@@ -502,6 +513,8 @@ def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None
     model.train(train)
     totals: dict[str, float] = {}
     num_batches = 0
+    truth, predictions, targets = [], [], []
+    gradient_report = {}
 
     for batch in loader:
         batch = batch.to(device)
@@ -510,9 +523,17 @@ def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None
 
         with torch.set_grad_enabled(train):
             output = model(batch)
+            args._log_objective_gradients = bool(train and num_batches == 0 and getattr(args, "dockq_range_diagnostics", False))
             loss, metrics = compute_gate_loss(
                 model, batch, output, args, balancer=balancer, update_balancer=train
             )
+            if getattr(args, "dockq_range_diagnostics", False) and not train:
+                truth.extend(batch.y.detach().cpu().view(-1).tolist())
+                predictions.extend(output["quality_pred"].detach().cpu().view(-1).tolist())
+                targets.extend(Path(p).stem for p in batch.hdf5_path)
+            for key in list(metrics):
+                if key.startswith("gradient_"):
+                    gradient_report[key] = metrics.pop(key)
             if train:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -524,7 +545,15 @@ def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None
             totals[name] = totals.get(name, 0.0) + value
         num_batches += 1
 
-    return {name: value / max(num_batches, 1) for name, value in totals.items()}
+    result = {name: value / max(num_batches, 1) for name, value in totals.items()}
+    if predictions:
+        report = prediction_report(truth, predictions, targets)
+        result["_dockq_report"] = report
+        # Sweep checkpoints use exact graph-weighted unweighted MSE, regardless of training weights.
+        result["target_mse"] = report["pooled_mse"]
+    if gradient_report:
+        result["_gradients"] = gradient_report
+    return result
 
 
 def main() -> None:
@@ -706,9 +735,31 @@ def main() -> None:
                         help="Keep the test set sealed until the best validation checkpoint is chosen.")
     parser.add_argument("--no-test-evaluation", action="store_true",
                         help="Diagnostic tuning: evaluate validation only, including after training; export validation predictions.")
+    parser.add_argument("--cpu-threads", type=int, default=None)
+    parser.add_argument("--reconstruction-lambda", type=float, default=1.0)
+    parser.add_argument("--dockq-range-weighting", choices=("none", "inverse-sqrt"), default="none")
+    parser.add_argument("--dockq-weight-cap", type=float, default=3.0,
+                        help="Maximum ratio between largest and smallest training bin weights")
+    parser.add_argument("--dockq-range-diagnostics", action="store_true",
+                        help="Export per-epoch range metrics; select checkpoints by exact graph-average MSE")
     args = parser.parse_args()
+    if not math.isfinite(args.reconstruction_lambda) or args.reconstruction_lambda < 0:
+        parser.error("reconstruction-lambda must be finite and nonnegative")
+    if args.loss_weight_mode != "fixed" and (args.reconstruction_lambda != 1 or args.dockq_range_weighting != "none"):
+        parser.error("DockQ objective sweeps require fixed loss weights")
+    if args.dockq_range_weighting != "none" and not args.dockq_range_diagnostics:
+        parser.error("Range weighting requires --dockq-range-diagnostics")
+    if args.dockq_range_diagnostics and args.target_name != "DockQ":
+        parser.error("Range diagnostics require target-name DockQ")
+
     if args.no_test_evaluation:
         args.validation_only_during_training = True
+    if args.cpu_threads is not None:
+        if args.cpu_threads < 1:
+            parser.error("cpu-threads must be positive")
+        torch.set_num_threads(args.cpu_threads)
+        torch.set_num_interop_threads(1)
+        print(f"CPU execution: main PyTorch threads={torch.get_num_threads()}, interop={torch.get_num_interop_threads()}, loader workers={args.num_workers}; persistent workers={args.persistent_workers}", flush=True)
     apply_cluster_path_defaults(args)
 
     if not 0.0 <= args.test_fraction < 1.0:
@@ -840,6 +891,13 @@ def main() -> None:
     test_loader = DataLoader(test_dataset, **make_dataloader_kwargs(args, device, shuffle=False))
     print("Dataloaders ready.")
 
+    if args.dockq_range_diagnostics:
+        profile = fit_range_weights(read_training_labels(dataset, split_indices["train"]), args.dockq_weight_cap)
+        args.dockq_bin_weights = profile["weights"] if args.dockq_range_weighting != "none" else None
+        (output_dir / "dockq_training_distribution.json").write_text(json.dumps(profile, indent=2) + "\n")
+        print(f"DockQ training bins: {profile['counts']}; active weights: {args.dockq_bin_weights}", flush=True)
+        (output_dir / "dockq_epoch_metrics.jsonl").write_text("")
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = build_lr_scheduler(optimizer, args, steps_per_epoch=len(train_loader))
     if scheduler is None:
@@ -916,6 +974,11 @@ def main() -> None:
             )
             history_file.flush()
 
+            if args.dockq_range_diagnostics:
+                record = dict(epoch=epoch, validation=val_metrics["_dockq_report"],
+                              first_train_batch_gradients=train_metrics.get("_gradients", {}))
+                with (output_dir / "dockq_epoch_metrics.jsonl").open("a") as metrics_file:
+                    metrics_file.write(json.dumps(record, allow_nan=False) + "\n")
             current_val_metric = val_metrics[args.checkpoint_metric]
             message = (
                 f"Epoch {epoch:03d} "

@@ -35,3 +35,27 @@ apbs_analysis/approach_movie.py
 !/gate_run/**/*.sh
 !/gate_run/**/*.slurm
 !/gate_run/**/*.md
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_dockq_rmse.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_dockq_spearman.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_incremental_changes.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_reconstruction_metrics.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_validation_loss_components.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_validation_target_mse.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/dockq_by_target_gat2_01_rsasa_i.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/dockq_by_target_gat2_02_plus_interface_node_degree.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/dockq_by_target_gat2_03_plus_voronoi_contact_area.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/dockq_by_target_gat4_residual_01_rsasa_i.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/dockq_by_target_gat4_residual_02_plus_interface_node_degree.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/dockq_by_target_gat4_residual_03_plus_voronoi_contact_area.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/node_degree_target_rmse_comparison.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/per_target_rmse_all_runs.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/reconstruction_per_target_distributions.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/voronoi_target_rmse_comparison.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_dockq_rmse.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/voronoi_target_rmse_comparison.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/reconstruction_per_target_distributions.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/reconstruction_per_target_distributions.pdf
+gate_run/full_feature_ablation_lr5e-6/analysis_figures/per_target_rmse_all_runs.pdf
+
+# Keep PDF figure exports under gate_run out of version control.
+/gate_run/**/*.[pP][dD][fF]
