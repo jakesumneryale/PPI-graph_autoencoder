@@ -22,3 +22,16 @@ apbs_analysis/approach_movie.py
 
 # Read-only local data audit outputs
 /local_data_audit/
+
+# Generated figure exports
+*.png
+*.pdf
+
+# Run artifacts, archives, logs, and exported tables; retain analysis source.
+/gate_run/**
+!/gate_run/**/
+!/gate_run/**/*.py
+!/gate_run/**/*.ipynb
+!/gate_run/**/*.sh
+!/gate_run/**/*.slurm
+!/gate_run/**/*.md

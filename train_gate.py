@@ -704,7 +704,11 @@ def main() -> None:
     parser.add_argument("--esm-projection-dim", type=int, default=64)
     parser.add_argument("--validation-only-during-training", action="store_true",
                         help="Keep the test set sealed until the best validation checkpoint is chosen.")
+    parser.add_argument("--no-test-evaluation", action="store_true",
+                        help="Diagnostic tuning: evaluate validation only, including after training; export validation predictions.")
     args = parser.parse_args()
+    if args.no_test_evaluation:
+        args.validation_only_during_training = True
     apply_cluster_path_defaults(args)
 
     if not 0.0 <= args.test_fraction < 1.0:
@@ -869,8 +873,11 @@ def main() -> None:
     print(f"Edge features: {dataset.edge_features} ({first_graph.edge_attr.size(1)} columns)")
     print(f"Loss history: {history_path}")
     print(f"Target splits ({split_manifest_status}): {split_manifest_path}")
-    print(f"Test predictions: {test_predictions_path}")
-    print(f"Reconstruction summary: {reconstruction_summary_path}")
+    if args.no_test_evaluation:
+        print('Diagnostic mode: validation predictions only; test evaluation is disabled.')
+    else:
+        print(f"Test predictions: {test_predictions_path}")
+        print(f"Reconstruction summary: {reconstruction_summary_path}")
 
     balancer = build_loss_balancer(args)
     if balancer is not None:
@@ -951,6 +958,13 @@ def main() -> None:
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
+    if args.no_test_evaluation:
+        rows = collect_prediction_rows(model, val_loader, device, args,
+            node_feature_set=args.node_feature_set, node_features=dataset.node_features)
+        path = output_dir / 'validation_predictions.csv'
+        save_prediction_rows(path, rows)
+        print(f'Diagnostic run complete; best checkpoint: {checkpoint_path}; validation predictions: {path}; no test evaluation.')
+        return
     test_prediction_rows = collect_prediction_rows(
         model,
         test_loader,
