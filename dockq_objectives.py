@@ -14,19 +14,21 @@ def bin_indices(values):
     return np.searchsorted(EDGES[1:-1].astype(np.float32), values.astype(np.float32), side='right')
 
 
-def fit_range_weights(labels, cap=3.):
+def fit_range_weights(labels, cap=3., exponent=.5):
     if cap < 1 or not np.isfinite(cap):
         raise ValueError('Weight cap must be finite and >= 1')
+    if not np.isfinite(exponent) or not 0 <= exponent <= 1:
+        raise ValueError("Weight exponent must be in [0, 1]")
     bins = bin_indices(labels)
     if len(bins) == 0:
         raise ValueError('Cannot fit weights to an empty training split')
     counts = np.bincount(bins, minlength=5)
     # Cap the ratio to the most common bin BEFORE mean-one normalization.
-    raw = np.sqrt(counts.max() / np.maximum(counts, 1))
+    raw = (counts.max() / np.maximum(counts, 1)) ** exponent
     raw = np.minimum(raw, cap)
     weights = raw / np.mean(raw[bins])
     return dict(edges=EDGES.tolist(), counts=counts.tolist(), weights=weights.tolist(),
-                max_weight_ratio=cap, normalization='mean training example weight = 1',
+                exponent=exponent, max_weight_ratio=cap, normalization='mean training example weight = 1',
                 source='training labels only')
 
 

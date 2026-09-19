@@ -20,7 +20,7 @@ try:
 except ImportError:  # pragma: no cover - compatibility fallback for older PyG.
     batched_negative_sampling = None
 
-from dockq_objectives import fit_range_weights, read_training_labels, weighted_dockq_mse, prediction_report
+from dockq_objectives import fit_range_weights, read_training_labels, weighted_dockq_mse, prediction_report, bin_indices
 
 from GATE_model import GraphAttentionAutoencoder
 from EGNN_model import build_graph_model
@@ -728,13 +728,17 @@ def main() -> None:
     parser.add_argument("--eval-log-every", type=int, default=1000)
     parser.add_argument("--strict-hdf5", action="store_true", help="Fail instead of skipping unreadable HDF5 files.")
     parser.add_argument("--architecture", choices=("gat", "egnn"), default="gat")
-    parser.add_argument("--pooling", choices=("all", "interface"), default="all")
+    parser.add_argument("--pooling", choices=("all", "interface", "combined"), default="all")
     parser.add_argument("--use-esm", action="store_true")
     parser.add_argument("--esm-projection-dim", type=int, default=64)
     parser.add_argument("--validation-only-during-training", action="store_true",
                         help="Keep the test set sealed until the best validation checkpoint is chosen.")
     parser.add_argument("--no-test-evaluation", action="store_true",
                         help="Diagnostic tuning: evaluate validation only, including after training; export validation predictions.")
+    parser.add_argument("--dockq-weight-exponent", type=float, default=.5)
+    parser.add_argument("--initialize-checkpoint", default=None)
+    parser.add_argument("--evaluation-only", action="store_true")
+    parser.add_argument("--export-training-predictions", action="store_true")
     parser.add_argument("--cpu-threads", type=int, default=None)
     parser.add_argument("--reconstruction-lambda", type=float, default=1.0)
     parser.add_argument("--dockq-range-weighting", choices=("none", "inverse-sqrt"), default="none")
@@ -752,6 +756,12 @@ def main() -> None:
     if args.dockq_range_diagnostics and args.target_name != "DockQ":
         parser.error("Range diagnostics require target-name DockQ")
 
+    if args.evaluation_only and not args.initialize_checkpoint:
+        parser.error("evaluation-only requires initialize-checkpoint")
+    if (args.evaluation_only or args.initialize_checkpoint) and not (args.no_test_evaluation and args.dockq_range_diagnostics):
+        parser.error("Checkpoint follow-ups require no-test-evaluation and dockq-range-diagnostics")
+    if not math.isfinite(args.dockq_weight_exponent) or not 0 <= args.dockq_weight_exponent <= 1:
+        parser.error("dockq-weight-exponent must be in [0, 1]")
     if args.no_test_evaluation:
         args.validation_only_during_training = True
     if args.cpu_threads is not None:
@@ -892,11 +902,51 @@ def main() -> None:
     print("Dataloaders ready.")
 
     if args.dockq_range_diagnostics:
-        profile = fit_range_weights(read_training_labels(dataset, split_indices["train"]), args.dockq_weight_cap)
+        profile = fit_range_weights(read_training_labels(dataset, split_indices["train"]), args.dockq_weight_cap, args.dockq_weight_exponent)
         args.dockq_bin_weights = profile["weights"] if args.dockq_range_weighting != "none" else None
         (output_dir / "dockq_training_distribution.json").write_text(json.dumps(profile, indent=2) + "\n")
         print(f"DockQ training bins: {profile['counts']}; active weights: {args.dockq_bin_weights}", flush=True)
         (output_dir / "dockq_epoch_metrics.jsonl").write_text("")
+
+    initial_checkpoint = None
+    if args.initialize_checkpoint:
+        initial_checkpoint = torch.load(args.initialize_checkpoint, map_location=device)
+        for key, expected in [("node_features", dataset.node_features), ("edge_features", dataset.edge_features),
+                              ("edge_feature_transforms", edge_feature_transforms), ("edge_feature_stats", edge_feature_stats)]:
+            if initial_checkpoint[key] != expected:
+                raise ValueError(f"Initialization checkpoint differs in {key}")
+        for split_name, paths in split_paths.items():
+            if {Path(p).stem for p in initial_checkpoint['target_splits'][split_name]} != {p.stem for p in paths}:
+                raise ValueError(f"Initialization target split differs: {split_name}")
+        model.load_state_dict(initial_checkpoint["model_state_dict"], strict=True)
+
+    def export_diagnostic_predictions():
+        report = {}
+        loaders = {"validation": val_loader}
+        if args.export_training_predictions or args.evaluation_only:
+            loaders["training"] = DataLoader(train_dataset, **make_dataloader_kwargs(args, device, shuffle=False))
+        for split_name, loader in loaders.items():
+            rows = collect_prediction_rows(model, loader, device, args,
+                node_feature_set=args.node_feature_set, node_features=dataset.node_features)
+            save_prediction_rows(output_dir / f"{split_name}_predictions.csv", rows)
+            if args.dockq_range_diagnostics:
+                report[split_name] = prediction_report([r['true_target'] for r in rows],
+                    [r['predicted_target'] for r in rows], [r['target_id'] for r in rows])
+                if split_name == 'training':
+                    coverage = {}
+                    for row, bin_id in zip(rows, bin_indices([r['true_target'] for r in rows])):
+                        target = row['target_id']
+                        if target not in coverage:
+                            coverage[target] = dict(target=target, n=0, **{f'bin_{i}_count': 0 for i in range(5)})
+                        coverage[target]['n'] += 1
+                        coverage[target][f'bin_{bin_id}_count'] += 1
+                    write_csv(output_dir / 'training_target_coverage.csv', list(coverage.values()))
+        (output_dir / "prediction_metrics.json").write_text(json.dumps(report, indent=2) + "\n")
+
+    if args.evaluation_only:
+        export_diagnostic_predictions()
+        print("Evaluation-only complete; training/validation predictions exported; no optimizer or test evaluation.")
+        return
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = build_lr_scheduler(optimizer, args, steps_per_epoch=len(train_loader))
@@ -947,6 +997,14 @@ def main() -> None:
     print(f"Checkpoint selected on: val_{args.checkpoint_metric}")
 
     best_val_metric = float("inf")
+    if initial_checkpoint is not None:
+        initial_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer)
+        best_val_metric = initial_metrics[args.checkpoint_metric]
+        (output_dir / "initial_validation.json").write_text(json.dumps(initial_metrics["_dockq_report"], indent=2) + "\n")
+        initial_checkpoint.update(args=vars(args), best_epoch=0, best_loss=best_val_metric,
+            best_metric=args.checkpoint_metric, best_metric_value=best_val_metric)
+        torch.save(initial_checkpoint, checkpoint_path)
+
     with history_path.open("w", newline="", encoding="ascii") as history_file:
         writer = csv.DictWriter(history_file, fieldnames=make_history_fieldnames())
         writer.writeheader()
@@ -1022,11 +1080,8 @@ def main() -> None:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     if args.no_test_evaluation:
-        rows = collect_prediction_rows(model, val_loader, device, args,
-            node_feature_set=args.node_feature_set, node_features=dataset.node_features)
-        path = output_dir / 'validation_predictions.csv'
-        save_prediction_rows(path, rows)
-        print(f'Diagnostic run complete; best checkpoint: {checkpoint_path}; validation predictions: {path}; no test evaluation.')
+        export_diagnostic_predictions()
+        print(f'Diagnostic run complete; best checkpoint: {checkpoint_path}; no test evaluation.')
         return
     test_prediction_rows = collect_prediction_rows(
         model,

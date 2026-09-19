@@ -62,8 +62,8 @@ class GraphAttentionAutoencoder(nn.Module):
         self.dropout = dropout
         self.residual_connections = residual_connections
         self.num_gat_layers = num_gat_layers
-        if pooling not in ("all", "interface"):
-            raise ValueError("pooling must be all or interface")
+        if pooling not in ("all", "interface", "combined"):
+            raise ValueError("pooling must be all, interface or combined")
         self.pooling = pooling
         self.esm_dim = esm_dim
         self.esm_projector = (nn.Sequential(nn.LayerNorm(esm_dim),
@@ -124,7 +124,7 @@ class GraphAttentionAutoencoder(nn.Module):
             nn.Linear(hidden_dim, 1),
         )
         self.graph_projector = nn.Sequential(
-            nn.Linear(2 * latent_dim, hidden_dim),
+            nn.Linear((4 if pooling == "combined" else 2) * latent_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, latent_dim),
@@ -212,7 +212,11 @@ class GraphAttentionAutoencoder(nn.Module):
 
     def pool_nodes(self, node_z, batch, data):
         size = int(batch.max()) + 1
-        if self.pooling == "interface":
+        whole = torch.cat((global_mean_pool(node_z, batch, size=size),
+                           global_max_pool(node_z, batch, size=size)), dim=-1)
+        if self.pooling == "all":
+            return whole
+        if self.pooling in ("interface", "combined"):
             mask = getattr(data, "interface_mask", None)
             if mask is None or mask.numel() != node_z.size(0):
                 raise ValueError("Interface pooling requires one interface_mask value per node")
@@ -221,8 +225,9 @@ class GraphAttentionAutoencoder(nn.Module):
             if (counts == 0).any():
                 raise ValueError("Interface pooling encountered a graph with no interface nodes")
             node_z, batch = node_z[mask], batch[mask]
-        return torch.cat((global_mean_pool(node_z, batch, size=size),
-                          global_max_pool(node_z, batch, size=size)), dim=-1)
+        interface = torch.cat((global_mean_pool(node_z, batch, size=size),
+                               global_max_pool(node_z, batch, size=size)), dim=-1)
+        return torch.cat((whole, interface), dim=-1) if self.pooling == "combined" else interface
 
     def decode_edge_features(self, node_z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """Reconstruct edge attributes for the provided edge list."""

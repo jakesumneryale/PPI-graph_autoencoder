@@ -3,10 +3,11 @@ import argparse
 import json
 from pathlib import Path
 import h5py
+import numpy as np
 from dockq_objectives import fit_range_weights
 
 
-def preflight(source):
+def preflight(source, require_interface=False):
     matrix=json.loads(source.read_text())
     run=next(r for r in matrix['runs'] if r['config']['name']=='baseline' and r['seed']==7)
     argv=run['argv']
@@ -27,6 +28,11 @@ def preflight(source):
             with h5py.File(p,'r') as f:
                 count+=len(f)
                 if not len(f): raise ValueError(f'Empty target file: {p}')
+                if require_interface and split in ('train','val'):
+                    for name in f:
+                        mask=f[name]['node_features']['interface_nodes'][()]
+                        if not np.isfinite(mask).all() or not np.any(mask):
+                            raise ValueError(f'Missing/invalid interface nodes: {p}:{name}')
                 if split=='train':
                     train_labels.extend(float(f[k]['target_scores']['DockQ'][()]) for k in f)
         expected=manifest['splits'][split]['sample_count']
@@ -37,4 +43,5 @@ def preflight(source):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__); p.add_argument('--source',type=Path,required=True)
-    preflight(p.parse_args().source)
+    p.add_argument("--require-interface", action="store_true")
+    args=p.parse_args(); preflight(args.source, args.require_interface)
