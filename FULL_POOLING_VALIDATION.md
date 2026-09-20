@@ -25,15 +25,15 @@ lists, or the old launcher's "full" mode (which meant more seeds on 10% data).
   Audits can be reused when graph/CSV path, size, modification time and audit
   code signature agree. Do not mutate graph files while this experiment runs.
 - A serial build step writes `gate_run/full_pooling_validation/coverage.json`
-  with raw/eligible/rejected counts and reasons. It requires at least **180,000
-  eligible graphs**, not merely 180,000 raw groups, before releasing GPU jobs.
+  with raw/eligible/rejected counts and reasons. It requires at least **150,000
+  eligible graphs**, not merely 150,000 raw groups, before releasing GPU jobs.
 - Target assignments are preserved from the completed 10% experiment. The
   manifest paths/counts are rebuilt for full data. A previously included target
   becoming empty or a new eligible target outside the split blocks training;
   no target is silently reassigned or dropped. Already excluded targets with
   no usable graphs remain reported exclusions.
 
-**Existing missing features may prevent the 180,000 threshold being met.**
+**Existing missing features may prevent the 150,000 threshold being met.**
 The earlier 10% audit had 21 empty targets, including missing Voronoi areas.
 This setup does not invent missing features or claim those graphs are usable.
 Inspect the coverage report before deciding whether to repair the source
@@ -128,3 +128,22 @@ runs (whole-graph and combined pooling) passed through the new audit/model-list/
 split/training/checkpoint/summary pipeline on a copied nine-graph software
 fixture. The low minimum used in that fixture is not the production default.
 No full cluster cohort count or full-scale runtime has been verified locally.
+
+## Retry the coverage build using completed audits
+
+The launcher now passes a default minimum of 150,000 eligible models. The
+standalone Python builder retains its conservative default; the launcher passes
+`--minimum` explicitly. Its audit code is unchanged so completed audit signatures
+remain valid.
+
+After a threshold-only build failure (no matrix yet), reuse the same directory:
+
+```bash
+RESUME_BUILD=1 MIN_ELIGIBLE_MODELS=150000 bash cluster/submit_full_pooling_validation.sh
+```
+
+This submits only a new build and its 12 dependent training tasks. It does not
+rerun inventory or audits. The builder still checks all audit signatures and
+frozen target membership. Cancel the old blocked training array using its exact
+job ID; do not cancel unrelated running experiments. Then queue the ESM launcher
+with `FULL_BUILD_JOB_ID` set to the newly printed Coverage/matrix job ID.

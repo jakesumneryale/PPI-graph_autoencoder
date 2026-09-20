@@ -59,3 +59,22 @@ per-target MSE and Spearman correlation, and writes paired deltas plus DockQ-bin
 metrics under each experiment's analysis directory. Negative MSE deltas favor
 ESM. Three seeds measure training variability; targets are the relevant units
 for assessing generalization. Do not claim a benefit from training loss alone.
+
+## Missing parent matrix
+
+The launcher requires the full-pooling inventory (`paths.json`) and its cohort
+matrix (`matrix.json`). A missing matrix does not prove the build is running:
+check `gate_run/full_pooling_validation/logs/build_*.out` for a failed build,
+or point `FULL_PARENT_DIR` to your actual parent directory.
+If the parent has not been submitted, launch `cluster/submit_full_pooling_validation.sh`
+first. Do not repeat that submission if it already exists.
+
+With an existing inventory and a pending parent build, you can queue ESM jobs
+immediately using the numeric **Coverage/matrix** job ID printed by that launcher:
+
+```bash
+FULL_BUILD_JOB_ID=12345678 bash cluster/submit_full_esm_validation.sh
+```
+
+Replace the example ID with the real parent build ID. Preparation receives an
+`afterok` dependency, so a failed parent build does not release ESM training.

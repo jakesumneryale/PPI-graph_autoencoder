@@ -66,3 +66,35 @@ def test_launcher_dependencies_and_serial_preparation():
     assert '#SBATCH --cpus-per-task=1' in Path('cluster/full_esm_preflight.slurm').read_text()
     import re
     assert not any('%' in arg for arg in re.findall(r'--array=\S+', launcher))
+
+
+def test_pending_parent_build_queues_with_dependency(tmp_path):
+    import os
+    import subprocess
+    from pathlib import Path
+    parent=tmp_path/'parent';parent.mkdir();(parent/'paths.json').write_text('[]')
+    project=tmp_path/'project';(project/'venv/bin').mkdir(parents=True)
+    (project/'venv/bin/activate').write_text('')
+    conda=tmp_path/'conda';(conda/'etc/profile.d').mkdir(parents=True)
+    (conda/'etc/profile.d/conda.sh').write_text('')
+    bootstrap=tmp_path/'bootstrap'
+    bootstrap.write_text('module() { :; }\nconda() { [[ "$1" != info ]] || echo "$MOCK_CONDA"; }\npython() { echo 3; }\nsbatch() { echo "$*" >> "$CAPTURE"; echo 123; }\n')
+    env=dict(os.environ,PROJECT_DIR=str(project),FULL_PARENT_DIR=str(parent),EXPERIMENT_DIR=str(tmp_path/'out'),ESM_SIDECARS=str(tmp_path/'sidecars'),BASH_ENV=str(bootstrap),MOCK_CONDA=str(conda),CAPTURE=str(tmp_path/'calls'),FULL_BUILD_JOB_ID='456')
+    script=str(Path('cluster/submit_full_esm_validation.sh').resolve())
+    result=subprocess.run(['bash',script],env=env,text=True,capture_output=True)
+    assert result.returncode==0,result.stderr
+    calls=(tmp_path/'calls').read_text().splitlines()
+    assert len(calls)==3
+    assert '--dependency=afterok:456' in calls[0]
+    assert '--array=1-6' in calls[2]
+
+
+def test_missing_parent_reports_inventory_without_submission(tmp_path):
+    import os
+    import subprocess
+    from pathlib import Path
+    env=dict(os.environ,PROJECT_DIR=str(tmp_path),FULL_PARENT_DIR=str(tmp_path/'missing'))
+    result=subprocess.run(['bash',str(Path('cluster/submit_full_esm_validation.sh').resolve())],env=env,text=True,capture_output=True)
+    assert result.returncode==2
+    assert 'Missing parent inventory' in result.stderr
+    assert 'Do not resubmit existing runs' in result.stderr
