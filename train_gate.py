@@ -730,6 +730,7 @@ def main() -> None:
     parser.add_argument("--architecture", choices=("gat", "egnn"), default="gat")
     parser.add_argument("--pooling", choices=("all", "interface", "combined"), default="all")
     parser.add_argument("--use-esm", action="store_true")
+    parser.add_argument("--esm-sidecar-dir", default=None)
     parser.add_argument("--esm-projection-dim", type=int, default=64)
     parser.add_argument("--validation-only-during-training", action="store_true",
                         help="Keep the test set sealed until the best validation checkpoint is chosen.")
@@ -798,6 +799,7 @@ def main() -> None:
         model_list_dir=args.model_list_dir,
         edge_feature_transforms=edge_feature_transforms,
         use_esm=args.use_esm, require_pos=args.architecture == "egnn",
+        esm_sidecar_dir=args.esm_sidecar_dir,
     )
     print("Dataset indexed.")
     first_graph = dataset[0]

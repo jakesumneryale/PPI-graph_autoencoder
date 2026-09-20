@@ -59,3 +59,6 @@ gate_run/full_feature_ablation_lr5e-6/analysis_figures/per_target_rmse_all_runs.
 
 # Keep PDF figure exports under gate_run out of version control.
 /gate_run/**/*.[pP][dD][fF]
+
+# Generated full-dataset ESM sidecars
+/full_pooling_esm_sidecars/

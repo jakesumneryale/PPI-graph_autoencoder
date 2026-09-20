@@ -257,8 +257,10 @@ class ProteinGraphHDF5Dataset(Dataset):
         edge_feature_stats: dict[str, tuple[float, float]] | None = None,
         use_esm: bool = False,
         require_pos: bool = False,
+        esm_sidecar_dir: str | Path | None = None,
     ) -> None:
         self.paths = _resolve_hdf5_paths(paths)
+        self.esm_sidecar_dir = Path(esm_sidecar_dir) if esm_sidecar_dir else None
         self.use_esm = use_esm
         self.require_pos = require_pos
         self.node_features = tuple(node_features)
@@ -559,9 +561,13 @@ class ProteinGraphHDF5Dataset(Dataset):
                 np.asarray(group["node_features/interface_nodes"][()]).reshape(-1) > 0)
         for required, key, attr in ((self.use_esm, "esm2", "esm"), (self.require_pos, "pos", "pos")):
             if required:
-                if key not in group:
-                    raise KeyError(f"{sample}: missing prepared {key}")
-                values = np.asarray(group[key][()], dtype=np.float32)
+                if key == "esm2" and self.esm_sidecar_dir is not None:
+                    from esm_sidecars import read_sidecar
+                    values = np.asarray(read_sidecar(self.esm_sidecar_dir, sample.path.stem, sample.group_name, group), dtype=np.float32)
+                else:
+                    if key not in group:
+                        raise KeyError(f"{sample}: missing prepared {key}")
+                    values = np.asarray(group[key][()], dtype=np.float32)
                 if values.ndim != 2 or len(values) != num_nodes or not np.isfinite(values).all():
                     raise ValueError(f"{sample}: invalid {key}")
                 if key == "pos" and values.shape[1] != 3:
