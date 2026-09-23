@@ -268,6 +268,9 @@ def make_history_fieldnames() -> list[str]:
     fieldnames = ["epoch"]
     for split_name in ("train", "val", "test"):
         fieldnames.extend(f"{split_name}_{metric_name}" for metric_name in LOSS_METRIC_NAMES)
+        # RMSE is sqrt(target_mse) and is recorded explicitly so DockQ error can be read
+        # in label units without transforming the history.
+        fieldnames.append(f"{split_name}_target_rmse")
     fieldnames.extend(f"weight_{term_name}" for term_name in LOSS_TERM_NAMES)
     fieldnames.extend(f"train_weighted_{term_name}" for term_name in LOSS_TERM_NAMES)
     return fieldnames
@@ -278,6 +281,9 @@ def flatten_history_row(epoch: int, metrics_by_split: dict[str, dict[str, float]
     for split_name, metrics in metrics_by_split.items():
         for metric_name in LOSS_METRIC_NAMES:
             row[f"{split_name}_{metric_name}"] = metrics.get(metric_name, 0.0)
+        target_mse = row.get(f"{split_name}_target_mse")
+        row[f"{split_name}_target_rmse"] = (
+            math.sqrt(target_mse) if isinstance(target_mse, (int, float)) and target_mse >= 0 else float("nan"))
     train_metrics = metrics_by_split.get("train", {})
     for term_name in LOSS_TERM_NAMES:
         row[f"weight_{term_name}"] = train_metrics.get(f"weight_{term_name}", 0.0)
@@ -732,6 +738,13 @@ def main() -> None:
     parser.add_argument("--use-esm", action="store_true")
     parser.add_argument("--esm-sidecar-dir", default=None)
     parser.add_argument("--esm-projection-dim", type=int, default=64)
+    parser.add_argument("--esm-scale", type=float, default=1.0,
+        help="Multiply the projected ESM block by this factor before concatenating it with the "
+             "structural node features. Values below 1 reduce how much the encoder input is sequence.")
+    parser.add_argument("--esm-dropout", type=float, default=0.0,
+        help="Dropout applied to the projected ESM block only, leaving structural features untouched.")
+    parser.add_argument("--esm-gate", action="store_true",
+        help="Make the ESM scale a learnable scalar initialised at --esm-scale.")
     parser.add_argument("--validation-only-during-training", action="store_true",
                         help="Keep the test set sealed until the best validation checkpoint is chosen.")
     parser.add_argument("--no-test-evaluation", action="store_true",
@@ -812,6 +825,9 @@ def main() -> None:
         architecture=args.architecture, pooling=args.pooling,
         esm_dim=first_graph.esm.size(1) if args.use_esm else 0,
         esm_projection_dim=args.esm_projection_dim,
+        esm_scale=args.esm_scale,
+        esm_dropout=args.esm_dropout,
+        esm_gate=args.esm_gate,
         in_node_feats=first_graph.x.size(1),
         in_edge_feats=first_graph.edge_attr.size(1),
         hidden_dim=args.hidden_dim,

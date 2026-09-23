@@ -31,6 +31,9 @@ class GraphAttentionAutoencoder(nn.Module):
         pooling: str = "all",
         esm_dim: int = 0,
         esm_projection_dim: int = 64,
+        esm_scale: float = 1.0,
+        esm_dropout: float = 0.0,
+        esm_gate: bool = False,
     ) -> None:
         super().__init__()
         if in_node_feats <= 0:
@@ -66,8 +69,23 @@ class GraphAttentionAutoencoder(nn.Module):
             raise ValueError("pooling must be all, interface or combined")
         self.pooling = pooling
         self.esm_dim = esm_dim
+        if esm_scale <= 0:
+            raise ValueError("esm_scale must be positive")
+        if not 0 <= esm_dropout < 1:
+            raise ValueError("esm_dropout must lie in [0, 1)")
+        # Keep index 1 of the Sequential the Linear layer: EquivariantGraphAutoencoder
+        # reads esm_projector[1].out_features to size its own encoder.
         self.esm_projector = (nn.Sequential(nn.LayerNorm(esm_dim),
-            nn.Linear(esm_dim, esm_projection_dim), nn.SiLU()) if esm_dim else None)
+            nn.Linear(esm_dim, esm_projection_dim), nn.SiLU(),
+            nn.Dropout(esm_dropout)) if esm_dim else None)
+        # The projected ESM block is concatenated with the structural node features, so
+        # esm_projection_dim alone decides how much of the encoder input is sequence.
+        # esm_scale rescales that block without changing its width; esm_gate makes the
+        # same factor learnable, initialised at esm_scale, so the model can reduce its
+        # own reliance on sequence. A fixed scale adds no state_dict entry, which keeps
+        # checkpoints from earlier ESM runs loadable.
+        self.esm_scale = float(esm_scale)
+        self.esm_gate = nn.Parameter(torch.tensor(float(esm_scale))) if (esm_dim and esm_gate) else None
         encoder_dim = in_node_feats + (esm_projection_dim if esm_dim else 0)
 
         edge_dim = in_edge_feats or None
@@ -207,7 +225,9 @@ class GraphAttentionAutoencoder(nn.Module):
             esm = getattr(data, "esm", None)
             if esm is None or esm.shape != (x.size(0), self.esm_dim):
                 raise ValueError("Missing or incorrectly shaped per-residue ESM embeddings")
-            x = torch.cat((x, self.esm_projector(esm.float())), dim=-1)
+            projected = self.esm_projector(esm.float())
+            scale = self.esm_gate if self.esm_gate is not None else self.esm_scale
+            x = torch.cat((x, projected * scale), dim=-1)
         return x
 
     def pool_nodes(self, node_z, batch, data):
