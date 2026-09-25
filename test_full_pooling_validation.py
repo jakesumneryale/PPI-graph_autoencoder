@@ -35,7 +35,7 @@ def test_full_selection_counts_and_flags(tmp_path):
     for r in runs:
         a=r['argv'];assert a[a.index('--data')+1]==str(data.resolve())
         assert a[a.index('--model-list-dir')+1]==str((out/'model_lists').resolve())
-        assert '--no-test-evaluation' in a and '--max-samples' not in a
+        assert '--no-test-evaluation' not in a and '--validation-only-during-training' not in a and '--max-samples' not in a
         assert a[a.index('--seed')+1] in ('7','17','27')
     with pytest.raises(FileExistsError):build(paths,cache,split,source,out,rs,minimum=3)
 

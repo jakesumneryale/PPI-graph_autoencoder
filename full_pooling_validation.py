@@ -170,6 +170,12 @@ def build(paths_file, audit_dir, prior_split, source_matrix, output, rsasa_dir, 
                 if any(flag in a for flag in ('--initialize-checkpoint','--evaluation-only','--use-esm')):raise ValueError('Expected from-scratch reference')
                 if '--no-test-evaluation' not in a or '--dockq-range-diagnostics' not in a:
                     raise ValueError('Reference must be validation-only with DockQ range diagnostics')
+                # The reference is validation-only; the full-dataset runs are not, so both the
+                # per-epoch test pass and the final test_predictions.csv are wanted here. Checkpoint
+                # selection still runs on val_target_mse only, so this spends the test set as a
+                # second, evaluated-not-selected-on split rather than an unbiased holdout.
+                for flag in ('--no-test-evaluation','--validation-only-during-training'):
+                    if flag in a:a.remove(flag)
                 opts={'--data':paths[0].parent.resolve(),'--model-list-dir':lists.resolve(),'--split-manifest':manifest.resolve(),
                       '--optional-node-features-dir':rsasa_dir.resolve(),'--seed':seed,'--output-dir':r['output'],
                       '--pooling':pool,'--dockq-weight-exponent':alpha,'--epochs':50,'--batch-size':16,'--num-workers':7,

@@ -62,3 +62,6 @@ gate_run/full_feature_ablation_lr5e-6/analysis_figures/per_target_rmse_all_runs.
 
 # Generated full-dataset ESM sidecars
 /full_pooling_esm_sidecars/
+
+# Private research/results-writing handoff
+/GNN_PROJECT_RESEARCH_HANDOFF.md
