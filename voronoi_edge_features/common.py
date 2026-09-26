@@ -35,7 +35,7 @@ CHECKPOINT_MODEL_DATASETS = (
 
 POSITIVE_MODEL_PATTERN = re.compile(r"^complex\.\d{1,2}_\d{1,2}_\d{1,2}(?:_corrected)?$")
 NEGATIVE_MODEL_PATTERN = re.compile(r"^complex\.\d{1,5}_\d(?:_corrected)?$")
-UNIFORM_SAMPLE_MODEL_PATTERN = re.compile(r"^random_(?P<target>.+)_model_(?P<index>\d+)$")
+UNIFORM_SAMPLE_MODEL_PATTERN = re.compile(r"^(?P<family>sampled|random)_(?P<target>.+)_model_(?P<index>\d+)$")
 
 
 @dataclass(frozen=True)
@@ -65,18 +65,19 @@ def infer_relative_pdb_path(target_name: str, graph_group_name: str) -> tuple[st
     if NEGATIVE_MODEL_PATTERN.fullmatch(graph_group_name):
         return str(sampled_dir / "random_negatives" / pdb_filename), "random_negative"
 
-    # A separate decoy-generation batch: graph groups are "random_<target>_model_N",
-    # structures on disk are "relaxed_<target>_model_N.pdb" directly under sampled_<target>/
-    # (no "_corrected_H_0001" suffix, unlike the complex.X_Y_Z batch above).
+    # Uniformly sampled batch: "sampled_<t>_model_N" structures sit directly in sampled_<t>/,
+    # "random_<t>_model_N" ones in sampled_<t>/random_negatives/; both are relaxed_<t>_model_N.pdb.
     uniform_match = UNIFORM_SAMPLE_MODEL_PATTERN.fullmatch(graph_group_name)
     if uniform_match and uniform_match.group("target") == target_name:
         pdb_filename = f"relaxed_{target_name}_model_{uniform_match.group('index')}.pdb"
-        return str(sampled_dir / pdb_filename), "uniformly_sampled"
+        if uniform_match.group("family") == "random":
+            return str(sampled_dir / "random_negatives" / pdb_filename), "random_negative"
+        return str(sampled_dir / pdb_filename), "sampled"
 
     raise ValueError(
         "Unsupported graph/model naming scheme for "
         f"{graph_group_name!r}. Expected complex.X_X_X or complex.X_X, "
-        "optionally suffixed with _corrected, or random_<target>_model_N."
+        "optionally suffixed with _corrected, or sampled_/random_<target>_model_N."
     )
 
 

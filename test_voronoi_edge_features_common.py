@@ -14,10 +14,14 @@ def test_negative_complex_pattern_unchanged():
     assert location == 'random_negative'
 
 
-def test_uniformly_sampled_batch_resolves_to_relaxed_pdb():
+def test_uniform_batch_sampled_family_top_level():
+    path, location = infer_relative_pdb_path('3qc8', 'sampled_3qc8_model_1')
+    assert path == 'sampled_3qc8/relaxed_3qc8_model_1.pdb' and location == 'sampled'
+
+
+def test_uniform_batch_random_family_in_random_negatives():
     path, location = infer_relative_pdb_path('1c3a', 'random_1c3a_model_1')
-    assert path == 'sampled_1c3a/relaxed_1c3a_model_1.pdb'
-    assert location == 'uniformly_sampled'
+    assert path == 'sampled_1c3a/random_negatives/relaxed_1c3a_model_1.pdb' and location == 'random_negative'
 
 
 def test_uniformly_sampled_batch_target_mismatch_rejected():
