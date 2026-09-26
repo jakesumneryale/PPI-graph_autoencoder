@@ -5,7 +5,7 @@
   "val_fraction": 0.1,
   "splits": {
     "train": {
-      "target_count": 103,
+      "target_count": 105,
       "sample_count": 136684,
       "targets": [
         "1acb",
@@ -13,6 +13,7 @@
         "1avx",
         "1ay7",
         "1bkd",
+        "1c3a",
         "1d6r",
         "1dfj",
         "1e96",
@@ -37,6 +38,7 @@
         "1nw9",
         "1oc0",
         "1oph",
+        "1pdk",
         "1ppe",
         "1qav",
         "1r0r",
@@ -118,6 +120,7 @@
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1avx.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1ay7.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1bkd.hdf5",
+        "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1c3a.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1d6r.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1dfj.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1e96.hdf5",
@@ -142,6 +145,7 @@
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1nw9.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1oc0.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1oph.hdf5",
+        "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1pdk.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1ppe.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1qav.hdf5",
         "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs/1r0r.hdf5",
