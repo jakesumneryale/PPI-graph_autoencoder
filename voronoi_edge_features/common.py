@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = REPO_ROOT / "voronoi_edge_features_data"
 DEFAULT_REFERENCE_DIR = DEFAULT_DATA_DIR / "model_references"
 DEFAULT_OUTPUT_DIR = DEFAULT_DATA_DIR / "contact_area_hdf5"
+DEFAULT_NAME_MAP_DIR = DEFAULT_DATA_DIR / "pdb_name_maps"
 DEFAULT_GRAPH_DATA_DIR = Path("/scratch/ppi_autoencoder_code/processed_graph_data")
 CLUSTER_GRAPH_DATA_DIR = Path("/home/jas485/project_pi_co54/jas485/ppi_processed_graphs")
 GRAPH_DATA_ENV_VAR = "PPI_HDF5_DATA"

@@ -63,6 +63,12 @@ cd "$PROJECT_DIR"
 echo "=== [$(date)] Environment preflight (target=$TARGET_NAME) ==="
 python cluster/check_voronoi_environment.py
 
+echo "=== [$(date)] Structure mapping (target=$TARGET_NAME) ==="
+python infer_pdb_mapping.py write-map \
+  --graph "$GRAPH_DATA_DIR/${TARGET_NAME}.hdf5" \
+  --sampled-dir "$SAMPLED_DIR" \
+  --output "$PROJECT_DIR/voronoi_edge_features_data/pdb_name_maps/${TARGET_NAME}.csv"
+
 echo "=== [$(date)] Phase A: compute (target=$TARGET_NAME, array_task=$SLURM_ARRAY_TASK_ID, node=${SLURM_JOB_NODELIST:-unknown}) ==="
 python generate_voronoi_contact_area_data.py \
   "$PDB_BASE_DIR/$TARGET_NAME" \
