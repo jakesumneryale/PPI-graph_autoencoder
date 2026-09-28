@@ -179,7 +179,7 @@ class GraphAttentionAutoencoder(nn.Module):
             return edge_attr
         return edge_attr.index_select(1, self.edge_recon_index.to(edge_attr.device))
 
-    def encode(self, data, return_attention: bool = False):
+    def encode(self, data):
         """Encode a PyG ``Data`` or ``Batch`` object.
 
         Expected attributes:
@@ -187,15 +187,6 @@ class GraphAttentionAutoencoder(nn.Module):
             edge_index: ``[2, total_edges]`` contact edges.
             edge_attr: optional ``[total_edges, in_edge_feats]`` edge features.
             batch: optional node-to-graph assignment vector.
-
-        With ``return_attention=True``, also returns a list of ``(edge_index,
-        alpha)`` pairs, one per GAT layer, where ``alpha`` is
-        ``[num_edges, gat_heads]`` -- exactly what ``GATConv`` reports via its
-        own ``return_attention_weights`` option, collected here across every
-        layer for post-hoc interpretability analysis. Requesting this adds no
-        randomness and does not affect the returned node/graph latents, so it
-        is safe to call on a trained model without altering its behavior;
-        ``return_attention`` should be left at its default during training.
         """
         x = self.encoder_inputs(data)
         edge_index = data.edge_index.long()
@@ -207,15 +198,7 @@ class GraphAttentionAutoencoder(nn.Module):
         if batch is None:
             batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
 
-        attention: list[tuple[torch.Tensor, torch.Tensor]] = []
-
-        if return_attention:
-            h, (attn_edge_index, alpha) = self.gat1(
-                x, edge_index, edge_attr=edge_attr, return_attention_weights=True
-            )
-            attention.append((attn_edge_index, alpha))
-        else:
-            h = self.gat1(x, edge_index, edge_attr=edge_attr)
+        h = self.gat1(x, edge_index, edge_attr=edge_attr)
         if self.residual_connections:
             h = h + self.input_residual(x)
         h = F.elu(h)
@@ -224,13 +207,7 @@ class GraphAttentionAutoencoder(nn.Module):
         gat_layers = (self.gat2, *self.extra_gat_layers)
         for layer_index, layer in enumerate(gat_layers):
             residual = h
-            if return_attention:
-                h, (attn_edge_index, alpha) = layer(
-                    h, edge_index, edge_attr=edge_attr, return_attention_weights=True
-                )
-                attention.append((attn_edge_index, alpha))
-            else:
-                h = layer(h, edge_index, edge_attr=edge_attr)
+            h = layer(h, edge_index, edge_attr=edge_attr)
             if self.residual_connections:
                 h = h + residual
             h = F.elu(h)
@@ -240,8 +217,6 @@ class GraphAttentionAutoencoder(nn.Module):
         node_z = self.node_projector(h)
         pooled = self.pool_nodes(node_z, batch, data)
         graph_z = self.graph_projector(pooled)
-        if return_attention:
-            return node_z, graph_z, attention
         return node_z, graph_z
 
     def encoder_inputs(self, data):
