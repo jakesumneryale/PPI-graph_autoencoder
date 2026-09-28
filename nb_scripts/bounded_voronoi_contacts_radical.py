@@ -17,18 +17,7 @@ import pyvoro
 import create_protein_graph_structure as jk
 import trimesh as tm
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument('-d','--dir',help='Directory to file')
-parser.add_argument('-f','--fh',help='File name of pdb')
-parser.add_argument('-p','--probe',default=1.4,help='Probe size to define boundary')
-parser.add_argument('-o','--out',required=False,help='Output file name indicator, must be included if save=True')
-parser.add_argument('-od','--out_dir',required=False,help='Output file directory, must be included if save=True')
-parser.add_argument('-s','--save', default=False,help='Save outputs to .csv files')
-args=parser.parse_args()
-
 aa_one_to_three={v: k for k, v in jk.aa_three_to_one.items()}
-
 
 def create_surface(coords,atomic_radii,probe_size=1.4):
 
@@ -82,7 +71,7 @@ def get_bounded_voro(protein_df, box_margin = 1, dispersion = 4.5,probe_size = 1
     that are specified in the protein_df. 
     
     Input
-    protein_df: protein dataframe in format from jk.get_protein_information()
+    protein_df: protein dataframe in format from .get_protein_information()
     box_margin: padding added to box volume
     dispersion: grid size for voronoi calculation
     probe_size: see create_surface()
@@ -183,6 +172,7 @@ def get_all_contacts_aa(protein_df,voronoi_tessellation):
 
             rec_ind=protein_df[protein_df['aa_id']==aai]['aa_ind'].iloc[0]
             rec_type=aa_one_to_three[protein_df[protein_df['aa_id']==aai]['aa_name'].iloc[0]]
+
             lig_ind=protein_df[protein_df['aa_id']==aaj]['aa_ind'].iloc[0]
             lig_type=aa_one_to_three[protein_df[protein_df['aa_id']==aaj]['aa_name'].iloc[0]]
 
@@ -313,6 +303,16 @@ def add_packing_info(protein_df,neighbor_adj_mat_atom,neighbor_adj_mat_aa,vorono
 
 
 def main():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d','--dir',help='Directory to file')
+    parser.add_argument('-f','--fh',help='File name of pdb')
+    parser.add_argument('-p','--probe',default=1.4,help='Probe size to define boundary',type=float)
+    parser.add_argument('-o','--out',required=False,help='Output file name indicator, must be included if save=True')
+    parser.add_argument('-od','--out_dir',required=False,help='Output file directory, must be included if save=True')
+    parser.add_argument('-s','--save', default=False,help='Save outputs to .csv files')
+    args=parser.parse_args()
+
 
     pdb_name=args.fh
     pdb_dir=Path(args.dir)

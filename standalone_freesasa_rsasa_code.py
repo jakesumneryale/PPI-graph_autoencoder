@@ -521,8 +521,12 @@ def main():
 		for pdb_file in pdb_files:
 
 			## Get the protein information dataframe 
+			try:
+				protein_df = get_protein_information(pdb_file, input_dir)
 
-			protein_df = get_protein_information(pdb_file, input_dir)
+			except:
+				continue           
+			
 
 			## Get the SASA for the protein
 

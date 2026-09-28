@@ -170,8 +170,8 @@ def get_protein_information(pdb_name, pdb_dir, nchains = 2):
         ## Increment the chain ID
         chain_count += 1
         
-        if chain_count == nchains+1:
-            break
+        # if chain_count == nchains+1:
+        #     break
         
         
     ## Create dataframe from information
