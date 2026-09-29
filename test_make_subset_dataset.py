@@ -12,6 +12,7 @@ import numpy as np
 from make_subset_dataset import (
     allocate_stratified_counts,
     classify_model,
+    load_allowed_models,
     select_subset,
     write_subset,
 )
@@ -107,6 +108,19 @@ class WriteSubsetTests(unittest.TestCase):
             self.assertEqual(source.stat().st_mtime_ns, before)
             with h5py.File(source, "r") as h:
                 self.assertEqual(len(list(h.keys())), 3)
+
+
+class LoadAllowedModelsTests(unittest.TestCase):
+    def test_reads_one_name_per_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "1acb.txt").write_text("complex.0_0_0\ncomplex.0_0_1\n\n")
+            allowed = load_allowed_models(root, "1acb")
+            self.assertEqual(allowed, {"complex.0_0_0", "complex.0_0_1"})
+
+    def test_missing_file_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(load_allowed_models(Path(tmp), "absent_target"))
 
 
 if __name__ == "__main__":

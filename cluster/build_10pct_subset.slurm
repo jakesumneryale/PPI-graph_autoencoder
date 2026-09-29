@@ -18,6 +18,15 @@
 # target-level split itself is untouched -- all 146 targets remain, just with
 # fewer models each -- so the existing shared_target_splits.json / 105-12-29
 # split (Sec. 4.3.1) still applies to the subset directly.
+#
+# --model-list-dir restricts the candidate pool per target to the
+# audit-passing models in voronoi_dataset_audit/successful_models (written by
+# audit_voronoi_dataset.py: finite, correctly-shaped voronoi_contact_area)
+# before subsampling. This makes the resulting subset self-consistent: every
+# model it contains is already audit-clean, so no downstream training script
+# needs its own --model-list-dir pass -- and none safely could, since a
+# subsample of the full audit list cannot satisfy the strict "every listed
+# model is present in the file" invariant that check enforces.
 
 set -euo pipefail
 
@@ -25,6 +34,7 @@ PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoen
 DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}}"
 TARGETS_FILE="${TARGETS_FILE:-$PROJECT_DIR/cluster/targets.txt}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/gate_run/subset_10pct_hdf5}"
+MODEL_LIST_DIR="${MODEL_LIST_DIR:-$PROJECT_DIR/voronoi_dataset_audit/successful_models}"
 FRACTION="${FRACTION:-0.10}"
 SEED="${SEED:-20250909}"
 
@@ -38,12 +48,14 @@ cd "$PROJECT_DIR"
 echo "Data dir:   $DATA_DIR"
 echo "Targets:    $TARGETS_FILE"
 echo "Output dir: $OUTPUT_DIR"
+echo "Model list: $MODEL_LIST_DIR"
 echo "Fraction:   $FRACTION   Seed: $SEED"
 
 python make_subset_dataset.py \
   --data-dir "$DATA_DIR" \
   --targets-file "$TARGETS_FILE" \
   --output-dir "$OUTPUT_DIR" \
+  --model-list-dir "$MODEL_LIST_DIR" \
   --fraction "$FRACTION" \
   --seed "$SEED" \
   --allow-missing-targets

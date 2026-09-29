@@ -30,7 +30,6 @@ set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 DATA_DIR="${DATA_DIR:-$PROJECT_DIR/gate_run/subset_10pct_hdf5}"
-MODEL_LIST_DIR="${MODEL_LIST_DIR:-$PROJECT_DIR/voronoi_dataset_audit/successful_models}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$PROJECT_DIR/gate_run/recon_weight_zero_10pct}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-$PROJECT_DIR/gate_run/feature_ladder_10pct/shared_target_splits.json}"
 
@@ -74,7 +73,6 @@ nvidia-smi
 python train_gate.py \
   --cluster \
   --data "$DATA_DIR" \
-  --model-list-dir "$MODEL_LIST_DIR" \
   --device cuda \
   --epochs 50 \
   --batch-size 16 \

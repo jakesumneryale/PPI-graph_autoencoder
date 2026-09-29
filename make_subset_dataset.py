@@ -8,6 +8,16 @@ every model group copied verbatim (all committed features included, so
 whatever the full dataset has -- interface_node_degree, voronoi_contact_area,
 voronoi_contact_missing, etc. -- carries over unchanged).
 
+When --model-list-dir is given (the per-target .txt files written by
+audit_voronoi_dataset.py's successful_models output), the candidate pool for
+each target is restricted to that audit-passing set before subsampling, so
+the resulting subset is self-consistent: every model it contains already has
+a finite, correctly-shaped Voronoi contact-area feature, and a training run
+against the subset does not need a separate --model-list-dir pass (which
+would fail anyway, since a strict allowed-models check expects every listed
+model to be present in the file, an invariant a subsample of the full
+audit list cannot satisfy).
+
 Selection is deterministic given --seed: each model gets a stable pseudo-random
 rank from sha256(seed, target, model), so the same seed always picks the same
 subset, and a different seed gives an independent subset for a robustness
@@ -131,7 +141,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20250909)
     parser.add_argument("--allow-missing-targets", action="store_true",
                         help="Skip a target with no source file instead of failing.")
+    parser.add_argument("--model-list-dir", type=Path, default=None,
+                        help="Directory of per-target <target>.txt audit-passing model lists "
+                             "(e.g. voronoi_dataset_audit/successful_models). When given, only "
+                             "models in this list are eligible for subsampling.")
     return parser.parse_args()
+
+
+def load_allowed_models(model_list_dir: Path, target: str) -> set[str] | None:
+    list_path = model_list_dir / f"{target}.txt"
+    if not list_path.is_file():
+        return None
+    return {line.strip() for line in list_path.read_text().splitlines() if line.strip()}
 
 
 def main() -> int:
@@ -156,6 +177,17 @@ def main() -> int:
         if not model_names:
             print(f"SKIP {target}: source file has no model groups", file=sys.stderr)
             continue
+
+        if args.model_list_dir is not None:
+            allowed = load_allowed_models(args.model_list_dir, target)
+            if allowed is None:
+                print(f"SKIP {target}: no audit list at {args.model_list_dir / f'{target}.txt'}",
+                      file=sys.stderr)
+                continue
+            model_names = [name for name in model_names if name in allowed]
+            if not model_names:
+                print(f"SKIP {target}: no audit-passing models remain", file=sys.stderr)
+                continue
 
         selected = select_subset(model_names, target, args.fraction, args.seed)
         destination_path = args.output_dir / source_path.name
