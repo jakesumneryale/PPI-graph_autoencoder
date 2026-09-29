@@ -103,6 +103,7 @@ echo "Output: $OUTPUT_DIR"
 nvidia-smi
 
 python train_gate.py \
+  --cluster \
   --data "$DATA_DIR" \
   --model-list-dir "$MODEL_LIST_DIR" \
   --device cuda \

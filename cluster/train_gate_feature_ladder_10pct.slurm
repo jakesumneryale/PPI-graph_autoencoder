@@ -107,6 +107,7 @@ if [[ ! -f "$SPLIT_MANIFEST" ]]; then
   if [[ "$SLURM_ARRAY_TASK_ID" == "1" ]]; then
     echo "Task 1: writing shared split manifest for the 10% subset."
     python train_gate.py \
+      --cluster \
       --data "$DATA_DIR" \
       --model-list-dir "$MODEL_LIST_DIR" \
       --device cpu --num-workers 4 \
@@ -136,6 +137,7 @@ echo "Output: $OUTPUT_DIR"
 nvidia-smi
 
 python train_gate.py \
+  --cluster \
   --data "$DATA_DIR" \
   --model-list-dir "$MODEL_LIST_DIR" \
   --device cuda \

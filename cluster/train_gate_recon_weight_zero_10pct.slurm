@@ -72,6 +72,7 @@ nvidia-smi
 # balancer has no representation for "zero share" that also zeroes the
 # gradient contribution as directly as a fixed multiplicative 0 does.
 python train_gate.py \
+  --cluster \
   --data "$DATA_DIR" \
   --model-list-dir "$MODEL_LIST_DIR" \
   --device cuda \
