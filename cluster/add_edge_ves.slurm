@@ -22,6 +22,14 @@
 # charges (nb_scripts/create_graph_edge_ves.py). It is NOT the APBS-derived
 # V_ae named as a still-blocked, planned rung elsewhere in this project --
 # don't conflate the two when writing up results.
+#
+# Do not run this at the same time as add_rsasa_i_node.slurm against the same
+# DATA_DIR: both open the same per-target HDF5 files r+, and two processes
+# opening the same file at once raises BlockingIOError (HDF5's own file
+# locking), even though they write unrelated datasets. The script retries
+# transient lock contention with backoff, but submit these sequentially
+# (e.g. --dependency=afterany) rather than relying on the retry to paper over
+# a full-run collision.
 
 set -euo pipefail
 

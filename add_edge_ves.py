@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import ast
 import csv
+import time
 from pathlib import Path
 
 import h5py
@@ -89,6 +90,26 @@ def parse_v_es(raw_values: str, num_edges: int, source: str) -> np.ndarray:
     return array[:, None]
 
 
+def open_hdf5_for_write(path: Path, attempts: int = 8, delay: float = 10.0) -> h5py.File:
+    """Open an HDF5 file r+, retrying on another process's transient lock.
+
+    Two independent commit jobs (e.g. this script and add_rsasa_i_node.py)
+    opening the same target file in r+ mode at nearly the same moment collide
+    on HDF5's own file locking (BlockingIOError, errno 11) even though they
+    touch unrelated datasets -- retry with backoff instead of failing the
+    whole job over one momentarily-busy target.
+    """
+    last_error: OSError | None = None
+    for attempt in range(attempts):
+        try:
+            return h5py.File(path, "r+")
+        except BlockingIOError as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(delay)
+    raise last_error
+
+
 def dataset_is_valid(dataset: h5py.Dataset, num_edges: int) -> bool:
     if dataset.shape != (num_edges, 1) or not np.issubdtype(dataset.dtype, np.floating):
         return False
@@ -110,7 +131,7 @@ def process_file(
         raise FileNotFoundError(f"No V_es CSV found at {ves_csv_path}")
     ves_by_decoy = load_ves_by_decoy(ves_csv_path)
 
-    with h5py.File(path, "r+") as handle:
+    with open_hdf5_for_write(path) as handle:
         if allowed_models is not None:
             missing = allowed_models - set(handle.keys())
             if missing:

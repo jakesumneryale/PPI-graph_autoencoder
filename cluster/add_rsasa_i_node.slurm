@@ -21,6 +21,14 @@
 # rsasa_i_node is distinct from the existing optional "rsasa_i" (a per-decoy
 # graph-level average, loaded from *_avg_rSASA_i.csv). This script commits a
 # genuine per-node HDF5 feature and does not touch that older mechanism.
+#
+# Do not run this at the same time as add_edge_ves.slurm against the same
+# DATA_DIR: both open the same per-target HDF5 files r+, and two processes
+# opening the same file at once raises BlockingIOError (HDF5's own file
+# locking), even though they write unrelated datasets. The script retries
+# transient lock contention with backoff, but submit these sequentially
+# (e.g. --dependency=afterany) rather than relying on the retry to paper over
+# a full-run collision.
 
 set -euo pipefail
 
