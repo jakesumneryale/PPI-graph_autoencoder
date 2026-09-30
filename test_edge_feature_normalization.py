@@ -39,6 +39,11 @@ def write_graph_file(path: Path, num_graphs: int = 4, num_nodes: int = 6, seed: 
                 "voronoi_contact_missing",
                 data=rng.integers(0, 2, (len(contacts), 1)).astype(np.float32),
             )
+            # Signed, like real V_es -- must standardize without log1p (log1p rejects negatives).
+            edges.create_dataset(
+                "v_es",
+                data=rng.normal(0.0, 3.0, (len(contacts), 1)).astype(np.float32),
+            )
             scores = group.create_group("target_scores")
             scores.create_dataset("DockQ", data=np.float32(rng.random()))
 
@@ -157,6 +162,29 @@ class DatasetTransformTests(unittest.TestCase):
     def test_unsupported_transform_is_rejected_at_construction(self):
         with self.assertRaises(ValueError):
             self._dataset(edge_feature_transforms={"ca_dist": "sqrt"})
+
+    def test_v_es_is_signed_and_incompatible_with_log1p(self):
+        # v_es (unlike voronoi_contact_area) can be negative, so it must be
+        # standardized without a log1p transform.
+        raw = ProteinGraphHDF5Dataset(
+            self.root, node_features=("aa_type", "chain"), edge_features=("ca_dist", "v_es"),
+            require_target=True,
+        )[0].edge_attr
+        self.assertLess(float(raw[:, 1].min()), 0.0)
+        with self.assertRaises(ValueError):
+            ProteinGraphHDF5Dataset(
+                self.root, node_features=("aa_type", "chain"), edge_features=("ca_dist", "v_es"),
+                require_target=True, edge_feature_transforms={"v_es": "log1p"},
+            )[0]
+
+    def test_v_es_standardises_via_zscore(self):
+        stats = compute_edge_feature_stats(self.root, ("v_es",), {}, max_graphs=50)
+        dataset = ProteinGraphHDF5Dataset(
+            self.root, node_features=("aa_type", "chain"), edge_features=("ca_dist", "v_es"),
+            require_target=True, edge_feature_stats=stats,
+        )
+        column = dataset[0].edge_attr[:, 1].numpy()
+        self.assertLess(abs(float(column.mean())), 1.5)
 
 
 if __name__ == "__main__":

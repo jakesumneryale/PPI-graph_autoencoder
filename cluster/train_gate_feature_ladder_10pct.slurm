@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=gate_feature_ladder_10pct
 #SBATCH --partition=pi_co54
-#SBATCH --array=1-12
+#SBATCH --array=1-15
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=10G
@@ -11,16 +11,29 @@
 
 # PRIORITY 1 (highest -- the one that would actually go in a figure).
 # Cumulative feature ladder: core -> +interface degree -> +rSASA_i ->
-# +Voronoi contact area, >=3 seeds per rung, on the 10% subsampled dataset
-# built by build_10pct_subset.slurm.
+# +Voronoi contact area -> +electrostatics, >=3 seeds per rung, on the 10%
+# subsampled dataset built by build_10pct_subset.slurm.
+#
+# The "rsasa" rung (and every rung after it) uses rsasa_i_node, a genuine
+# per-residue rSASA_i (column rSASA_i_complex, committed by
+# add_rsasa_i_node.py), not the older rsasa_i graph-level average. That
+# average was a stopgap and is superseded here -- this rerun corrects it, it
+# does not add a parallel rung.
 #
 # The ladder in dissertation.tex also names a fifth rung, "+electrostatics".
-# That rung is NOT included here and cannot be run yet: Fig. 4.3's
-# electrostatics pipeline was run once per bound native structure (84
-# targets), not once per decoy model, and V_ae is not a committed graph
-# feature for any of the ~150k training/test decoys. Computing it at decoy
-# scale is a separate, APBS-costed data-generation project, not a training
-# hyperparameter -- see Table 4.1, where V_ae is still marked "planned".
+# It was previously blocked because the only committed electrostatics feature
+# was V_ae, an APBS-derived quantity computed once per bound native structure
+# (84 targets, Fig. 4.3/Table 4.1), never at decoy scale. The "electrostatics"
+# rung here instead uses v_es (committed by add_edge_ves.py): a screened,
+# per-decoy electrostatic edge feature computed from PQR partial charges
+# (nb_scripts/create_graph_edge_ves.py), a DIFFERENT quantity from V_ae. It
+# fills the same ladder slot conceptually but should be described as v_es, not
+# as the previously-planned V_ae, in any write-up of this run.
+#
+# Both add_rsasa_i_node.py and add_edge_ves.py must be run against the full
+# dataset (cluster/add_rsasa_i_node.slurm, cluster/add_edge_ves.slurm) and
+# build_10pct_subset.slurm re-run afterward, before this script is submitted --
+# the subset is a verbatim copy of whatever's already committed upstream.
 #
 # Same target-level split as every other run this chapter uses (105/12/29,
 # seed 5): split_dataset_by_target only depends on the sorted target
@@ -50,7 +63,7 @@ if [[ ! -d "$DATA_DIR" ]]; then
   exit 2
 fi
 
-RUNGS=(core degree rsasa voronoi)
+RUNGS=(core degree rsasa voronoi electrostatics)
 SEEDS=(7 17 27)
 RUNG_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) / 3 ))
 SEED_INDEX=$(( (SLURM_ARRAY_TASK_ID - 1) % 3 ))
@@ -71,16 +84,24 @@ case "$RUNG" in
     EXTRA_ARGS=()
     ;;
   rsasa)
-    NODE_FEATURES="aa_type,chain,interface_nodes,interface_node_degree,rsasa_i"
+    NODE_FEATURES="aa_type,chain,interface_nodes,interface_node_degree,rsasa_i_node"
     EDGE_FEATURES="interface_edges,ca_dist"
     EDGE_RECON_FEATURES="interface_edges,ca_dist"
     EXTRA_ARGS=()
     ;;
   voronoi)
-    NODE_FEATURES="aa_type,chain,interface_nodes,interface_node_degree,rsasa_i"
+    NODE_FEATURES="aa_type,chain,interface_nodes,interface_node_degree,rsasa_i_node"
     EDGE_FEATURES="interface_edges,ca_dist,voronoi_contact_area,voronoi_contact_missing"
     EDGE_RECON_FEATURES="interface_edges,ca_dist"
     EXTRA_ARGS=(--edge-feature-transforms "voronoi_contact_area=log1p" --standardize-edge-features "voronoi_contact_area")
+    ;;
+  electrostatics)
+    NODE_FEATURES="aa_type,chain,interface_nodes,interface_node_degree,rsasa_i_node"
+    EDGE_FEATURES="interface_edges,ca_dist,voronoi_contact_area,voronoi_contact_missing,v_es"
+    EDGE_RECON_FEATURES="interface_edges,ca_dist"
+    # v_es is signed (unlike voronoi_contact_area), so it is z-scored but not log1p'd --
+    # apply_feature_transform's log1p rejects negative values.
+    EXTRA_ARGS=(--edge-feature-transforms "voronoi_contact_area=log1p" --standardize-edge-features "voronoi_contact_area,v_es")
     ;;
   *)
     echo "Unknown rung: $RUNG" >&2; exit 2 ;;
@@ -109,8 +130,8 @@ if [[ ! -f "$SPLIT_MANIFEST" ]]; then
       --cluster \
       --data "$DATA_DIR" \
       --device cpu --num-workers 4 \
-      --node-features "aa_type,chain,interface_nodes,interface_node_degree,rsasa_i" \
-      --edge-features "interface_edges,ca_dist,voronoi_contact_area,voronoi_contact_missing" \
+      --node-features "aa_type,chain,interface_nodes,interface_node_degree,rsasa_i_node" \
+      --edge-features "interface_edges,ca_dist,voronoi_contact_area,voronoi_contact_missing,v_es" \
       --seed 5 \
       --split-manifest "$SPLIT_MANIFEST" \
       --output-dir "$OUTPUT_ROOT" \
