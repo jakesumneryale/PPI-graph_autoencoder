@@ -10,10 +10,25 @@ import numpy as np
 
 from add_rsasa_i_node import (
     FEATURE_NAME,
+    check_failure_rate,
     load_rsasa_i_node,
     process_file,
     run_lengths,
 )
+
+
+class CheckFailureRateTests(unittest.TestCase):
+    def test_within_threshold_returns_rate_without_raising(self):
+        rate = check_failure_rate(failures=5, total=1000, max_failure_rate=0.05, feature_name="x")
+        self.assertAlmostEqual(rate, 0.005)
+
+    def test_exceeding_threshold_raises(self):
+        with self.assertRaises(SystemExit):
+            check_failure_rate(failures=100, total=1000, max_failure_rate=0.05, feature_name="x")
+
+    def test_zero_total_does_not_divide_by_zero(self):
+        rate = check_failure_rate(failures=0, total=0, max_failure_rate=0.05, feature_name="x")
+        self.assertEqual(rate, 0.0)
 
 
 def write_rsasa_csv(path: Path, values: list[float], chains: list[str]) -> None:

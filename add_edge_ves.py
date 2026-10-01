@@ -66,6 +66,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--overwrite", action="store_true", help="Recompute even valid existing datasets.")
     parser.add_argument("--log-every", type=int, default=10)
+    parser.add_argument(
+        "--max-failure-rate",
+        type=float,
+        default=0.05,
+        help=(
+            "Exit 0 despite per-model failures as long as the overall failure rate stays at or "
+            "below this. A small, roughly-constant rate of decoys with no edge_features at all "
+            "(unrelated to this feature) is a known, pre-existing property of the source data -- "
+            "each failed model is still recorded in --report, and is automatically excluded from "
+            "training by the dataset loader regardless of this script's exit code. Exceeding the "
+            "threshold usually means something systemic broke instead."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -190,6 +203,17 @@ def process_file(
     }
 
 
+def check_failure_rate(failures: int, total: int, max_failure_rate: float, feature_name: str) -> float:
+    """Return the observed failure rate, raising SystemExit if it exceeds the allowed threshold."""
+    failure_rate = (failures / total) if total else 0.0
+    if failure_rate > max_failure_rate:
+        raise SystemExit(
+            f"{feature_name} failure rate {failure_rate:.2%} exceeds --max-failure-rate "
+            f"{max_failure_rate:.2%} ({failures}/{total}); investigate before trusting this commit."
+        )
+    return failure_rate
+
+
 def resolve_target_file(data_dir: Path, target: str) -> Path:
     for suffix in (".hdf5", ".h5"):
         candidate = data_dir / f"{target}{suffix}"
@@ -248,7 +272,8 @@ def main() -> None:
     complete = sum(int(row["written_models"]) + int(row["skipped_valid_models"]) for row in rows)
     print(f"Validated {complete}/{total} models. Report: {report_path}")
     if failures:
-        raise SystemExit(f"v_es failed for {failures} models; training dependency will not run.")
+        print(f"{failures}/{total} models failed; see {report_path} for which ones.")
+    check_failure_rate(failures, total, args.max_failure_rate, FEATURE_NAME)
 
 
 if __name__ == "__main__":

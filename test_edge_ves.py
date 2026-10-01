@@ -10,10 +10,25 @@ import numpy as np
 
 from add_edge_ves import (
     FEATURE_NAME,
+    check_failure_rate,
     load_ves_by_decoy,
     parse_v_es,
     process_file,
 )
+
+
+class CheckFailureRateTests(unittest.TestCase):
+    def test_within_threshold_returns_rate_without_raising(self):
+        rate = check_failure_rate(failures=5, total=1000, max_failure_rate=0.05, feature_name="x")
+        self.assertAlmostEqual(rate, 0.005)
+
+    def test_exceeding_threshold_raises(self):
+        with self.assertRaises(SystemExit):
+            check_failure_rate(failures=100, total=1000, max_failure_rate=0.05, feature_name="x")
+
+    def test_zero_total_does_not_divide_by_zero(self):
+        rate = check_failure_rate(failures=0, total=0, max_failure_rate=0.05, feature_name="x")
+        self.assertEqual(rate, 0.0)
 
 
 def write_ves_csv(path: Path, rows: dict[str, list[float]]) -> None:

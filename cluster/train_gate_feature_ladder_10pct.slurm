@@ -117,6 +117,19 @@ conda activate py311_env
 source "$PROJECT_DIR/venv/bin/activate"
 cd "$PROJECT_DIR"
 
+# 15 array tasks x --num-workers 8 = up to 120 DataLoader worker processes,
+# each opening HDF5 files read-only from the same NFS-mounted subset
+# directory. HDF5's default file locking applies even to read-only opens and
+# can spuriously fail under this much concurrent access on NFS
+# (BlockingIOError: "unable to lock file", errno 11 -- seen mid-training on
+# the unrelated model_extensions/full_pooling_repaired run). Safe to disable
+# here because every DataLoader access to these files is read-only --
+# concurrent readers can never corrupt a file. Do NOT do this for a process
+# that writes (e.g. add_rsasa_i_node.py/add_edge_ves.py), where locking is the
+# thing that turns a real concurrent-write collision into a clean failure
+# instead of a corrupted file.
+export HDF5_USE_FILE_LOCKING=FALSE
+
 mkdir -p "$OUTPUT_DIR"
 
 # Task 1 writes the shared split; every other task waits for it rather than

@@ -39,6 +39,7 @@ NODE_FEATURE_DIMS = {
     "interface_nodes": 1,
     "interface_node_degree": 1,
     "rsasa_i": 1,
+    "rsasa_i_node": 1,
     "drsasa": 1,
 }
 EDGE_FEATURE_DIMS = {
@@ -46,6 +47,7 @@ EDGE_FEATURE_DIMS = {
     "ca_dist": 1,
     "voronoi_contact_area": 1,
     "voronoi_contact_missing": 1,
+    "v_es": 1,
     "apbs_pair_mean": 1,
     "apbs_pair_absdiff": 1,
     "apbs_pair_product": 1,
