@@ -68,6 +68,7 @@ class GraphAttentionAutoencoder(nn.Module):
         if pooling not in ("all", "interface", "combined"):
             raise ValueError("pooling must be all, interface or combined")
         self.pooling = pooling
+        self.detach_quality_input = False
         self.esm_dim = esm_dim
         if esm_scale <= 0:
             raise ValueError("esm_scale must be positive")
@@ -238,7 +239,11 @@ class GraphAttentionAutoencoder(nn.Module):
                 h = F.dropout(h, p=self.dropout, training=self.training)
 
         node_z = self.node_projector(h)
-        pooled = self.pool_nodes(node_z, batch, data)
+        # With detach_quality_input the DockQ path (graph projector + quality
+        # head) trains on frozen-in-time node embeddings: only reconstruction
+        # gradients reach the encoder, so it cannot fit DockQ labels directly.
+        quality_input = node_z.detach() if getattr(self, "detach_quality_input", False) else node_z
+        pooled = self.pool_nodes(quality_input, batch, data)
         graph_z = self.graph_projector(pooled)
         if return_attention:
             return node_z, graph_z, attention

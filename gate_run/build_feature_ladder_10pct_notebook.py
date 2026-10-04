@@ -131,7 +131,7 @@ fig, axes = plt.subplots(1, 2, figsize=(17, 6.6), constrained_layout=True)
 x = np.arange(len(RUNGS)); labels = [RUNG_LABEL[r] for r in RUNGS]
 for ax, mean_col, sd_col, run_col, ylabel, fmt in [
         (axes[0], 'mean_mse', 'sd_mse', 'test_target_mse', 'Test DockQ MSE', '%.4f'),
-        (axes[1], 'mean_rho', 'sd_rho', 'macro_rho', r'Mean within-target $\rho$', '%.3f')]:
+        (axes[1], 'mean_rho', 'sd_rho', 'macro_rho', r'$\langle\rho\rangle_t$', '%.3f')]:
     values = agg[mean_col].to_numpy(); errors = agg[sd_col].to_numpy()
     top = (values + errors).max()
     ax.bar(x, values, color=[RUNG_COLOR[r] for r in RUNGS], edgecolor='black',
@@ -186,6 +186,65 @@ for ax, col in zip(axes, recon_cols):
     ax.set_xticks(x, labels, fontsize=13, rotation=20)
     ax.set_ylabel(RECON_LABEL[col])
 save(fig, 'reconstruction_by_rung')
+''')
+
+md(r'''## Dissertation figure: DockQ performance and reconstruction quality together
+
+The two headline DockQ metrics (left) alongside three reconstruction-quality metrics (right), all on the same
+four-rung ladder. The point this figure is built to make: `voronoi` is roughly flat against `rsasa` on DockQ
+MSE and $\rho$ (it does not clearly win), but going `rsasa` $\to$ `voronoi` **uniformly** improves every
+reconstruction metric shown -- and sharply tightens the seed-to-seed spread, which `rsasa` alone does not
+(amino-acid identity accuracy std across seeds: 31.2 percentage points at `rsasa` vs. 3.7 at `voronoi`; edge
+$F_1$ std: 36.2 vs. 3.3). Voronoi contact area does not clearly help the downstream DockQ regression on this
+10% subset, but it makes the autoencoder's own structural reconstruction both better on average and far more
+reliable across seeds -- a result worth reporting on its own terms, independent of the DockQ number.
+
+Grayscale, darkest at `voronoi`, so it reproduces in print. Seed dots are drawn white-on-black so they stay
+visible against the darkest bars.''')
+
+code(r'''
+GRAY = {'core': '#d9d9d9', 'degree': '#a6a6a6', 'rsasa': '#636363', 'voronoi': '#000000'}
+
+fig = plt.figure(figsize=(18, 11.5))
+gs = fig.add_gridspec(2, 6)
+axes = [fig.add_subplot(gs[0, 0:2]), fig.add_subplot(gs[0, 2:4]), fig.add_subplot(gs[0, 4:6]),
+        fig.add_subplot(gs[1, 1:3]), fig.add_subplot(gs[1, 3:5])]
+fig.set_constrained_layout(True)
+PANEL_LABEL = ['(a)', '(b)', '(c)', '(d)', '(e)']
+
+def panel_label(ax, label):
+    ax.text(-0.14, 1.04, label, transform=ax.transAxes, fontsize=28, fontweight='bold', va='bottom', ha='right')
+
+dockq_specs = [
+    (axes[0], agg['mean_mse'], agg['sd_mse'], 'test_target_mse', 'Test DockQ MSE', '%.4f'),
+    (axes[1], agg['mean_rho'], agg['sd_rho'], 'macro_rho', r'$\langle\rho\rangle_t$', '%.3f'),
+]
+for ax, values, errors, run_col, ylabel, fmt in dockq_specs:
+    values = values.to_numpy(); errors = errors.to_numpy()
+    top = (values + errors).max()
+    ax.bar(x, values, color=[GRAY[r] for r in RUNGS], edgecolor='black', yerr=errors, capsize=6,
+           error_kw=dict(lw=1.6))
+    for i, r in enumerate(RUNGS):
+        seed_values = best.loc[best.rung == r, run_col].to_numpy()
+        ax.scatter(i + np.linspace(-.13, .13, len(seed_values)), seed_values,
+                   facecolors='white', edgecolors='black', linewidths=1.1, s=30, zorder=6)
+        ax.text(i, max(values[i] + errors[i], seed_values.max()) + .055 * top, fmt % values[i],
+                ha='center', fontsize=15)
+    ax.set_xticks(x, labels, fontsize=13, rotation=20); ax.set_ylabel(ylabel)
+    ax.set_ylim(0, top * 1.28)
+
+for ax, col in zip(axes[2:5], recon_cols[:3]):
+    values = recon[(col, 'mean')].to_numpy(); errors = recon[(col, 'std')].fillna(0).to_numpy()
+    top = (values + errors).max()
+    ax.bar(x, values, color=[GRAY[r] for r in RUNGS], edgecolor='black', yerr=errors, capsize=6,
+           error_kw=dict(lw=1.6))
+    ax.set_xticks(x, labels, fontsize=13, rotation=20); ax.set_ylabel(RECON_LABEL[col])
+    ax.set_ylim(0, top * 1.2)
+
+for ax, label in zip(axes[:5], PANEL_LABEL):
+    panel_label(ax, label)
+
+save(fig, 'dissertation_ladder_figure')
 ''')
 
 md(r'''## Limitations

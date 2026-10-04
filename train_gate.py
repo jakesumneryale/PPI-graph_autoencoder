@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import csv
 import json
 import math
@@ -23,6 +24,14 @@ except ImportError:  # pragma: no cover - compatibility fallback for older PyG.
 from dockq_objectives import fit_range_weights, read_training_labels, weighted_dockq_mse, prediction_report, bin_indices
 
 from GATE_model import GraphAttentionAutoencoder
+from anti_memorization import (
+    ModelEMA,
+    TargetAdversary,
+    TargetBalancedSampler,
+    adversary_loss,
+    augment_batch,
+    dann_coefficient,
+)
 from EGNN_model import build_graph_model
 from evaluate_gate_reconstruction import evaluate_checkpoint, write_csv
 from protein_hdf5_dataset import (
@@ -37,6 +46,9 @@ from protein_hdf5_dataset import (
 
 LOSS_METRIC_NAMES = ("loss", "node_mse", "edge_attr_mse", "edge_presence_bce", "target_mse")
 LOSS_TERM_NAMES = ("node_mse", "edge_attr_mse", "edge_presence_bce", "target_mse")
+ADVERSARY_HISTORY_NAMES = ("target_adversary_ce", "target_adversary_acc", "target_adversary_coefficient")
+VALIDATION_STEP_FIELDS = ("epoch", "global_step", "end_of_epoch", "ema", "val_target_mse",
+                          "val_macro_target_mse", "val_macro_bin_mse", "saved")
 NODE_FEATURE_SET_CHOICES = {
     "all": DEFAULT_NODE_FEATURES,
     "no-aa-identity": ("chain", "interface_nodes"),
@@ -264,7 +276,7 @@ def save_target_split_manifest(
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="ascii")
 
 
-def make_history_fieldnames() -> list[str]:
+def make_history_fieldnames(adversary: bool = False) -> list[str]:
     fieldnames = ["epoch"]
     for split_name in ("train", "val", "test"):
         fieldnames.extend(f"{split_name}_{metric_name}" for metric_name in LOSS_METRIC_NAMES)
@@ -273,6 +285,8 @@ def make_history_fieldnames() -> list[str]:
         fieldnames.append(f"{split_name}_target_rmse")
     fieldnames.extend(f"weight_{term_name}" for term_name in LOSS_TERM_NAMES)
     fieldnames.extend(f"train_weighted_{term_name}" for term_name in LOSS_TERM_NAMES)
+    if adversary:
+        fieldnames.extend(f"train_{name}" for name in ADVERSARY_HISTORY_NAMES)
     return fieldnames
 
 
@@ -288,6 +302,9 @@ def flatten_history_row(epoch: int, metrics_by_split: dict[str, dict[str, float]
     for term_name in LOSS_TERM_NAMES:
         row[f"weight_{term_name}"] = train_metrics.get(f"weight_{term_name}", 0.0)
         row[f"train_weighted_{term_name}"] = train_metrics.get(f"weighted_{term_name}", 0.0)
+    for name in ADVERSARY_HISTORY_NAMES:
+        if name in train_metrics:
+            row[f"train_{name}"] = train_metrics[name]
     return row
 
 
@@ -515,8 +532,36 @@ def compute_gate_loss(model, batch, output, args, balancer=None, update_balancer
     return total, metrics
 
 
-def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None, scheduler=None) -> dict[str, float]:
+def augmentation_enabled(args) -> bool:
+    return bool(getattr(args, "edge_dropout", 0) or getattr(args, "node_feature_mask", 0)
+                or getattr(args, "ca_dist_noise", 0))
+
+
+def forward_for_training(model, batch, args):
+    """Encode a corrupted copy when augmentation is on; decode and score against the clean graph."""
+    if not augmentation_enabled(args):
+        return model(batch)
+    corrupted = augment_batch(
+        batch,
+        edge_dropout=args.edge_dropout,
+        node_feature_mask=args.node_feature_mask,
+        ca_dist_noise=args.ca_dist_noise,
+        ca_dist_column=getattr(args, "_ca_dist_column", None),
+    )
+    node_z, graph_z = model.encode(corrupted)
+    decoded = model.decode(node_z, graph_z, batch)
+    return {**decoded, "node_embeddings": node_z, "graph_embeddings": graph_z}
+
+
+class TrainingState(SimpleNamespace):
+    """Mutable step bookkeeping shared by run_epoch and mid-epoch validation."""
+
+
+def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None, scheduler=None,
+              adversary=None, state=None, ema=None, step_callback=None) -> dict[str, float]:
     model.train(train)
+    if adversary is not None:
+        adversary.train(train)
     totals: dict[str, float] = {}
     num_batches = 0
     truth, predictions, targets = [], [], []
@@ -528,7 +573,7 @@ def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None
             optimizer.zero_grad(set_to_none=True)
 
         with torch.set_grad_enabled(train):
-            output = model(batch)
+            output = forward_for_training(model, batch, args) if train else model(batch)
             args._log_objective_gradients = bool(train and num_batches == 0 and getattr(args, "dockq_range_diagnostics", False))
             loss, metrics = compute_gate_loss(
                 model, batch, output, args, balancer=balancer, update_balancer=train
@@ -540,12 +585,32 @@ def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None
             for key in list(metrics):
                 if key.startswith("gradient_"):
                     gradient_report[key] = metrics.pop(key)
+            if train and adversary is not None:
+                labels = torch.tensor([state.target_index[Path(p).stem] for p in batch.hdf5_path],
+                                      dtype=torch.long, device=device)
+                coefficient = dann_coefficient(state.global_step / max(state.total_steps, 1))
+                adv_ce, adv_acc = adversary_loss(adversary(output["graph_embeddings"], coefficient), labels)
+                loss = loss + args.target_adversary_weight * adv_ce
+                metrics["target_adversary_ce"] = float(adv_ce.detach().cpu())
+                metrics["target_adversary_acc"] = adv_acc
+                metrics["target_adversary_coefficient"] = coefficient
             if train:
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                torch.nn.utils.clip_grad_norm_(state.parameters if state is not None else model.parameters(),
+                                               args.grad_clip)
                 optimizer.step()
                 if scheduler is not None:
                     scheduler.step()
+                if ema is not None:
+                    ema.update(model)
+                if state is not None:
+                    state.global_step += 1
+                    if (step_callback is not None and args.val_every_steps
+                            and state.global_step % args.val_every_steps == 0):
+                        step_callback()
+                        model.train(True)
+                        if adversary is not None:
+                            adversary.train(True)
 
         for name, value in metrics.items():
             totals[name] = totals.get(name, 0.0) + value
@@ -760,7 +825,40 @@ def main() -> None:
                         help="Maximum ratio between largest and smallest training bin weights")
     parser.add_argument("--dockq-range-diagnostics", action="store_true",
                         help="Export per-epoch range metrics; select checkpoints by exact graph-average MSE")
+    anti = parser.add_argument_group("anti-memorization (DockQ generalization)")
+    anti.add_argument("--val-every-steps", type=int, default=0,
+        help="Also validate (and checkpoint if better) every N optimizer steps, not only at epoch ends.")
+    anti.add_argument("--dockq-head-mode", choices=("joint", "detached"), default="joint",
+        help="'detached' stops DockQ gradients at the node embeddings: only reconstruction trains the encoder.")
+    anti.add_argument("--target-adversary-weight", type=float, default=0.0,
+        help="Weight of a training-target classifier behind gradient reversal on the graph embedding (0 = off).")
+    anti.add_argument("--edge-dropout", type=float, default=0.0,
+        help="Training-only probability of dropping each contact from the encoder input.")
+    anti.add_argument("--node-feature-mask", type=float, default=0.0,
+        help="Training-only fraction of nodes whose input feature row is zeroed.")
+    anti.add_argument("--ca-dist-noise", type=float, default=0.0,
+        help="Training-only Gaussian noise SD (Angstrom) added to the ca_dist encoder input.")
+    anti.add_argument("--decoys-per-target", type=int, default=0,
+        help="Target-balanced epochs: draw this many training decoys per target each epoch (0 = all, shuffled).")
+    anti.add_argument("--ema-decay", type=float, default=0.0,
+        help="Validate and checkpoint an exponential moving average of the weights with this decay (0 = off).")
     args = parser.parse_args()
+    if args.val_every_steps < 0 or args.decoys_per_target < 0:
+        parser.error("val-every-steps and decoys-per-target must be nonnegative")
+    if not math.isfinite(args.target_adversary_weight) or args.target_adversary_weight < 0:
+        parser.error("target-adversary-weight must be finite and nonnegative")
+    if not (0 <= args.edge_dropout < 1 and 0 <= args.node_feature_mask < 1 and args.ca_dist_noise >= 0):
+        parser.error("edge-dropout/node-feature-mask must be in [0, 1); ca-dist-noise must be nonnegative")
+    if not (args.ema_decay == 0 or 0 < args.ema_decay < 1):
+        parser.error("ema-decay must be 0 (off) or in (0, 1)")
+    anti_memorization_requested = (args.val_every_steps or args.dockq_head_mode != "joint"
+        or args.target_adversary_weight or augmentation_enabled(args) or args.decoys_per_target or args.ema_decay)
+    if anti_memorization_requested and args.architecture != "gat":
+        parser.error("anti-memorization options are implemented for the GAT architecture only")
+    if anti_memorization_requested and (args.loss_weight_mode != "fixed" or args.checkpoint_metric != "target_mse"):
+        parser.error("anti-memorization options require fixed loss weights and --checkpoint-metric target_mse")
+    if anti_memorization_requested and (args.initialize_checkpoint or args.evaluation_only):
+        parser.error("anti-memorization options are for from-scratch training")
     if not math.isfinite(args.reconstruction_lambda) or args.reconstruction_lambda < 0:
         parser.error("reconstruction-lambda must be finite and nonnegative")
     if args.loss_weight_mode != "fixed" and (args.reconstruction_lambda != 1 or args.dockq_range_weighting != "none"):
@@ -838,6 +936,14 @@ def main() -> None:
         predict_target=True,
         out_edge_feats=len(recon_columns),
     ).to(device)
+    if args.dockq_head_mode == "detached":
+        model.detach_quality_input = True
+    if args.ca_dist_noise > 0:
+        if "ca_dist" not in edge_feature_slices:
+            raise ValueError("--ca-dist-noise requires ca_dist among --edge-features")
+        if "ca_dist" in (args.standardize_edge_features or "").split(","):
+            raise ValueError("--ca-dist-noise is in Angstrom; ca_dist must not be standardized")
+        args._ca_dist_column = edge_feature_slices["ca_dist"].start
     if edge_recon_features != edge_features:
         model.set_edge_recon_index(recon_columns)
         skipped = [name for name in edge_features if name not in edge_recon_features]
@@ -914,7 +1020,18 @@ def main() -> None:
         f"num_workers={args.num_workers}, worker_start_method={worker_start_method}, "
         f"pin_memory={'yes' if device.type == 'cuda' else 'no'}..."
     )
-    train_loader = DataLoader(train_dataset, **make_dataloader_kwargs(args, device, shuffle=True))
+    if args.decoys_per_target:
+        groups: dict[Path, list[int]] = {}
+        for position, index in enumerate(split_indices["train"]):
+            groups.setdefault(dataset.samples[index].path, []).append(position)
+        train_sampler = TargetBalancedSampler([groups[path] for path in sorted(groups)],
+                                              args.decoys_per_target, seed=args.seed)
+        train_loader = DataLoader(train_dataset, sampler=train_sampler,
+                                  **make_dataloader_kwargs(args, device, shuffle=False))
+        print(f"Target-balanced epochs: {args.decoys_per_target} decoys/target x {len(groups)} targets "
+              f"= {len(train_sampler)} graphs per epoch")
+    else:
+        train_loader = DataLoader(train_dataset, **make_dataloader_kwargs(args, device, shuffle=True))
     val_loader = DataLoader(val_dataset, **make_dataloader_kwargs(args, device, shuffle=False))
     test_loader = DataLoader(test_dataset, **make_dataloader_kwargs(args, device, shuffle=False))
     print("Dataloaders ready.")
@@ -966,8 +1083,28 @@ def main() -> None:
         print("Evaluation-only complete; training/validation predictions exported; no optimizer or test evaluation.")
         return
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    adversary = None
+    target_index = {path.stem: i for i, path in enumerate(sorted(split_paths["train"]))}
+    if args.target_adversary_weight > 0:
+        adversary = TargetAdversary(args.latent_dim, args.hidden_dim, len(target_index), args.dropout).to(device)
+        print(f"Target adversary: {len(target_index)} training targets (chance accuracy "
+              f"{1 / len(target_index):.4f}), weight {args.target_adversary_weight:g}, DANN ramp")
+    trainable = list(model.parameters()) + (list(adversary.parameters()) if adversary is not None else [])
+    optimizer = torch.optim.AdamW(trainable, lr=args.lr, weight_decay=args.weight_decay)
     scheduler = build_lr_scheduler(optimizer, args, steps_per_epoch=len(train_loader))
+    ema = ModelEMA(model, args.ema_decay) if args.ema_decay else None
+    state = TrainingState(global_step=0, total_steps=len(train_loader) * args.epochs, parameters=trainable,
+                          target_index=target_index, last_validated_step=None, last_val_metrics=None)
+    if args.dockq_head_mode == "detached":
+        print("DockQ head mode: detached (encoder trained by reconstruction only)")
+    if augmentation_enabled(args):
+        print(f"Augmentation (training encoder input only): edge_dropout={args.edge_dropout:g}, "
+              f"node_feature_mask={args.node_feature_mask:g}, ca_dist_noise={args.ca_dist_noise:g} A")
+    if ema is not None:
+        print(f"Validation/checkpoints use EMA weights (decay {args.ema_decay:g})")
+    if args.val_every_steps:
+        print(f"Validation every {args.val_every_steps} steps and at each epoch end "
+              f"({len(train_loader)} steps/epoch)")
     if scheduler is None:
         print(f"Learning rate: {args.lr:g} (constant)")
     else:
@@ -1014,26 +1151,84 @@ def main() -> None:
         print(f"Loss weighting: fixed weights ({weight_text})")
     print(f"Checkpoint selected on: val_{args.checkpoint_metric}")
 
-    best_val_metric = float("inf")
+    state.best_val_metric = float("inf")
     if initial_checkpoint is not None:
         initial_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer)
-        best_val_metric = initial_metrics[args.checkpoint_metric]
+        state.best_val_metric = initial_metrics[args.checkpoint_metric]
         (output_dir / "initial_validation.json").write_text(json.dumps(initial_metrics["_dockq_report"], indent=2) + "\n")
-        initial_checkpoint.update(args=vars(args), best_epoch=0, best_loss=best_val_metric,
-            best_metric=args.checkpoint_metric, best_metric_value=best_val_metric)
+        initial_checkpoint.update(args=vars(args), best_epoch=0, best_loss=state.best_val_metric,
+            best_metric=args.checkpoint_metric, best_metric_value=state.best_val_metric)
         torch.save(initial_checkpoint, checkpoint_path)
 
+    def save_checkpoint(epoch: int) -> None:
+        payload = {
+            "model_state_dict": model.state_dict(),
+            "args": vars(args),
+            "node_features": dataset.node_features,
+            "node_feature_set": args.node_feature_set,
+            "edge_features": dataset.edge_features,
+            "edge_recon_features": edge_recon_features,
+            "edge_recon_columns": recon_columns,
+            "edge_feature_transforms": edge_feature_transforms,
+            "edge_feature_stats": edge_feature_stats,
+            "in_node_feats": first_graph.x.size(1),
+            "esm_dim": first_graph.esm.size(1) if args.use_esm else 0,
+            "in_edge_feats": first_graph.edge_attr.size(1),
+            "best_loss": state.best_val_metric,
+            "best_metric": args.checkpoint_metric,
+            "best_metric_value": state.best_val_metric,
+            "best_epoch": epoch,
+            "best_step": state.global_step,
+            "ema_weights": ema is not None,
+            "target_splits": {
+                split_name: [str(path) for path in paths]
+                for split_name, paths in split_paths.items()
+            },
+        }
+        if adversary is not None:
+            payload["target_adversary_state_dict"] = adversary.state_dict()
+            payload["target_adversary_targets"] = sorted(target_index, key=target_index.get)
+        torch.save(payload, checkpoint_path)
+
+    validation_steps_path = output_dir / "validation_steps.csv"
+    with validation_steps_path.open("w", newline="", encoding="ascii") as steps_file:
+        csv.DictWriter(steps_file, fieldnames=VALIDATION_STEP_FIELDS).writeheader()
+
+    def validate(epoch: int, end_of_epoch: bool) -> tuple[dict[str, float], bool]:
+        """Validate the current (or EMA) weights; checkpoint them if they beat the best so far."""
+        if state.last_validated_step == state.global_step and state.last_val_metrics is not None:
+            return state.last_val_metrics, False
+        with (ema.applied(model) if ema is not None else nullcontext()), torch.no_grad():
+            val_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer)
+            saved = val_metrics[args.checkpoint_metric] < state.best_val_metric
+            if saved:
+                state.best_val_metric = val_metrics[args.checkpoint_metric]
+                save_checkpoint(epoch)
+        report = val_metrics.get("_dockq_report", {})
+        with validation_steps_path.open("a", newline="", encoding="ascii") as steps_file:
+            csv.DictWriter(steps_file, fieldnames=VALIDATION_STEP_FIELDS).writerow(dict(
+                epoch=epoch, global_step=state.global_step, end_of_epoch=int(end_of_epoch), ema=int(ema is not None),
+                val_target_mse=val_metrics["target_mse"], val_macro_target_mse=report.get("macro_target_mse", ""),
+                val_macro_bin_mse=report.get("macro_bin_mse", ""), saved=int(saved)))
+        if not end_of_epoch:
+            print(f"  step {state.global_step} val target_mse={val_metrics['target_mse']:.5f}"
+                  + (" saved" if saved else ""), flush=True)
+        state.last_validated_step, state.last_val_metrics = state.global_step, val_metrics
+        return val_metrics, saved
+
     with history_path.open("w", newline="", encoding="ascii") as history_file:
-        writer = csv.DictWriter(history_file, fieldnames=make_history_fieldnames())
+        writer = csv.DictWriter(history_file, fieldnames=make_history_fieldnames(adversary is not None))
         writer.writeheader()
 
         for epoch in range(1, args.epochs + 1):
             print(f"Starting epoch {epoch:03d}...")
             train_metrics = run_epoch(
-                model, train_loader, optimizer, device, args, train=True, balancer=balancer, scheduler=scheduler
+                model, train_loader, optimizer, device, args, train=True, balancer=balancer, scheduler=scheduler,
+                adversary=adversary, state=state, ema=ema,
+                step_callback=lambda epoch=epoch: validate(epoch, end_of_epoch=False),
             )
+            val_metrics, saved = validate(epoch, end_of_epoch=True)
             with torch.no_grad():
-                val_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer)
                 test_metrics = ({name: float("nan") for name in LOSS_METRIC_NAMES}
                                 if args.validation_only_during_training else
                                 run_epoch(model, test_loader, optimizer, device, args, train=False, balancer=balancer))
@@ -1055,7 +1250,6 @@ def main() -> None:
                               first_train_batch_gradients=train_metrics.get("_gradients", {}))
                 with (output_dir / "dockq_epoch_metrics.jsonl").open("a") as metrics_file:
                     metrics_file.write(json.dumps(record, allow_nan=False) + "\n")
-            current_val_metric = val_metrics[args.checkpoint_metric]
             message = (
                 f"Epoch {epoch:03d} "
                 f"train loss={train_metrics['loss']:.5f} "
@@ -1063,37 +1257,11 @@ def main() -> None:
                 f"test loss={test_metrics['loss']:.5f} "
                 f"val target_mse={val_metrics['target_mse']:.5f}"
             )
-
-            if current_val_metric < best_val_metric:
-                best_val_metric = current_val_metric
-                torch.save(
-                    {
-                        "model_state_dict": model.state_dict(),
-                        "args": vars(args),
-                        "node_features": dataset.node_features,
-                        "node_feature_set": args.node_feature_set,
-                        "edge_features": dataset.edge_features,
-                        "edge_recon_features": edge_recon_features,
-                        "edge_recon_columns": recon_columns,
-                        "edge_feature_transforms": edge_feature_transforms,
-                        "edge_feature_stats": edge_feature_stats,
-                        "in_node_feats": first_graph.x.size(1),
-                        "esm_dim": first_graph.esm.size(1) if args.use_esm else 0,
-                        "in_edge_feats": first_graph.edge_attr.size(1),
-                        "best_loss": best_val_metric,
-                        "best_metric": args.checkpoint_metric,
-                        "best_metric_value": best_val_metric,
-                        "best_epoch": epoch,
-                        "target_splits": {
-                            split_name: [str(path) for path in paths]
-                            for split_name, paths in split_paths.items()
-                        },
-                    },
-                    checkpoint_path,
-                )
+            if "target_adversary_acc" in train_metrics:
+                message += f" adversary acc={train_metrics['target_adversary_acc']:.3f}"
+            if saved:
                 message += " saved"
-
-            print(message)
+            print(message, flush=True)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
