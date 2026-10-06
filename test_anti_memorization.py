@@ -175,10 +175,54 @@ def test_control_without_new_options_keeps_history_columns(tmp_path):
 
 @pytest.mark.parametrize("bad", [["--edge-dropout", "1.0"], ["--ema-decay", "1.5"],
                                  ["--target-adversary-weight", "-1"],
-                                 ["--val-every-steps", "5", "--loss-weight-mode", "shares"]])
+                                 ["--val-every-steps", "-1"]])
 def test_invalid_options_are_rejected(tmp_path, bad):
     cmd = [sys.executable, "train_gate.py", "--data", str(tmp_path), *bad]
     if "--loss-weight-mode" not in bad:
         cmd += ["--loss-weight-mode", "fixed", "--checkpoint-metric", "target_mse"]
     result = subprocess.run(cmd, text=True, capture_output=True)
-    assert result.returncode != 0
+    assert result.returncode != 0 and "train_gate.py: error:" in result.stderr
+
+
+def test_schedule_epochs_decouples_cosine_length_from_training_length():
+    from types import SimpleNamespace
+    from train_gate import build_lr_scheduler
+
+    def lr_at(step, **kw):
+        args = SimpleNamespace(lr_schedule="cosine", epochs=20, warmup_steps=0, lr_final_fraction=0.0, **kw)
+        opt = torch.optim.SGD([torch.nn.Parameter(torch.zeros(1))], lr=1.0)
+        sched = build_lr_scheduler(opt, args, steps_per_epoch=10)
+        for _ in range(step):
+            opt.step(); sched.step()
+        return opt.param_groups[0]["lr"]
+
+    assert lr_at(200) == pytest.approx(0.0, abs=1e-9)                      # 20-epoch schedule fully decayed
+    assert lr_at(200, lr_schedule_epochs=50) == pytest.approx(0.5 * (1 + np.cos(np.pi * 0.4)))
+    assert lr_at(100, lr_schedule_epochs=20) == pytest.approx(0.5)
+
+
+def test_step_validation_runs_with_adaptive_loss_shares(tmp_path):
+    out = tmp_path / "run"
+    base = [a for a in BASE]
+    base[base.index("fixed")] = "shares"
+    cmd = [sys.executable, "train_gate.py", "--data", str(make_data(tmp_path)), "--output-dir", str(out),
+           "--val-every-steps", "1", "--lr-schedule", "cosine", "--warmup-steps", "1", "--lr-schedule-epochs", "5",
+           *base]
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    steps = pd.read_csv(out / "validation_steps.csv")
+    predictions = pd.read_csv(out / "validation_predictions.csv")
+    history = pd.read_csv(out / "loss_history.csv")
+    mse = np.mean((predictions.true_target - predictions.predicted_target) ** 2)
+    assert mse == pytest.approx(steps.val_target_mse.min(), rel=1e-5, abs=1e-7)
+    assert history.weight_target_mse.nunique() > 1   # the balancer actually adapted the weights
+    assert "training stops after" in result.stdout and " min)" in result.stdout
+
+
+@pytest.mark.parametrize("bad", [["--edge-dropout", "0.1", "--loss-weight-mode", "shares"],
+                                 ["--lr-schedule-epochs", "50"],
+                                 ["--val-every-steps", "5", "--checkpoint-metric", "loss"]])
+def test_intervention_and_schedule_guards(tmp_path, bad):
+    cmd = [sys.executable, "train_gate.py", "--data", str(tmp_path), "--checkpoint-metric", "target_mse", *bad]
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    assert result.returncode != 0 and "train_gate.py: error:" in result.stderr

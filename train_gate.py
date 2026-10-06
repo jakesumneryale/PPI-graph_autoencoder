@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import random
+import time
 from types import SimpleNamespace
 
 import torch
@@ -435,7 +436,8 @@ def build_lr_scheduler(optimizer, args, steps_per_epoch: int):
     """
     if args.lr_schedule == "constant":
         return None
-    total_steps = max(steps_per_epoch * args.epochs, 1)
+    schedule_epochs = getattr(args, "lr_schedule_epochs", None) or args.epochs
+    total_steps = max(steps_per_epoch * schedule_epochs, 1)
     warmup_steps = min(max(args.warmup_steps, 0), total_steps - 1)
     final_fraction = args.lr_final_fraction
 
@@ -683,6 +685,9 @@ def main() -> None:
     )
     parser.add_argument("--warmup-steps", type=int, default=1000)
     parser.add_argument("--lr-final-fraction", type=float, default=0.03)
+    parser.add_argument("--lr-schedule-epochs", type=int, default=None,
+        help="Length of the cosine schedule in epochs (default --epochs). Larger than --epochs trains "
+             "only the first part of a longer schedule, e.g. the first 20 epochs of a 50-epoch decay.")
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--latent-dim", type=int, default=32)
     parser.add_argument("--gat-heads", type=int, default=4)
@@ -851,14 +856,20 @@ def main() -> None:
         parser.error("edge-dropout/node-feature-mask must be in [0, 1); ca-dist-noise must be nonnegative")
     if not (args.ema_decay == 0 or 0 < args.ema_decay < 1):
         parser.error("ema-decay must be 0 (off) or in (0, 1)")
-    anti_memorization_requested = (args.val_every_steps or args.dockq_head_mode != "joint"
-        or args.target_adversary_weight or augmentation_enabled(args) or args.decoys_per_target or args.ema_decay)
+    # Step validation is measurement only and works with either loss-weight mode; the
+    # training interventions were built and tested against the fixed-weight objective.
+    anti_memorization_requested = (args.dockq_head_mode != "joint" or args.target_adversary_weight
+        or augmentation_enabled(args) or args.decoys_per_target or args.ema_decay)
     if anti_memorization_requested and args.architecture != "gat":
         parser.error("anti-memorization options are implemented for the GAT architecture only")
     if anti_memorization_requested and (args.loss_weight_mode != "fixed" or args.checkpoint_metric != "target_mse"):
         parser.error("anti-memorization options require fixed loss weights and --checkpoint-metric target_mse")
-    if anti_memorization_requested and (args.initialize_checkpoint or args.evaluation_only):
+    if args.val_every_steps and args.checkpoint_metric != "target_mse":
+        parser.error("val-every-steps requires --checkpoint-metric target_mse")
+    if (anti_memorization_requested or args.val_every_steps) and (args.initialize_checkpoint or args.evaluation_only):
         parser.error("anti-memorization options are for from-scratch training")
+    if args.lr_schedule_epochs is not None and (args.lr_schedule_epochs < 1 or args.lr_schedule != "cosine"):
+        parser.error("lr-schedule-epochs must be positive and requires --lr-schedule cosine")
     if not math.isfinite(args.reconstruction_lambda) or args.reconstruction_lambda < 0:
         parser.error("reconstruction-lambda must be finite and nonnegative")
     if args.loss_weight_mode != "fixed" and (args.reconstruction_lambda != 1 or args.dockq_range_weighting != "none"):
@@ -1110,7 +1121,8 @@ def main() -> None:
     else:
         print(
             f"Learning rate: {args.lr:g} with {args.warmup_steps}-step warmup then cosine decay "
-            f"to {args.lr * args.lr_final_fraction:g} over {len(train_loader) * args.epochs} steps"
+            f"to {args.lr * args.lr_final_fraction:g} over {len(train_loader) * (args.lr_schedule_epochs or args.epochs)} steps "
+            f"(training stops after {len(train_loader) * args.epochs})"
         )
 
     train_summary = summarize_split(split_indices["train"], dataset.samples)
@@ -1222,6 +1234,7 @@ def main() -> None:
 
         for epoch in range(1, args.epochs + 1):
             print(f"Starting epoch {epoch:03d}...")
+            epoch_start = time.monotonic()
             train_metrics = run_epoch(
                 model, train_loader, optimizer, device, args, train=True, balancer=balancer, scheduler=scheduler,
                 adversary=adversary, state=state, ema=ema,
@@ -1261,6 +1274,7 @@ def main() -> None:
                 message += f" adversary acc={train_metrics['target_adversary_acc']:.3f}"
             if saved:
                 message += " saved"
+            message += f" ({(time.monotonic() - epoch_start) / 60:.1f} min)"
             print(message, flush=True)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
