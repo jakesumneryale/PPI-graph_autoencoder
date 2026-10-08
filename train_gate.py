@@ -23,9 +23,12 @@ except ImportError:  # pragma: no cover - compatibility fallback for older PyG.
     batched_negative_sampling = None
 
 from dockq_objectives import fit_range_weights, read_training_labels, weighted_dockq_mse, prediction_report, bin_indices
+from dockq_objectives import (CAPRI_CLASSES, CapriHead, capri_class, fit_hinge_normalizer, hinge_dockq_mse,
+                              pairwise_rank_loss)
 
 from GATE_model import GraphAttentionAutoencoder
 from anti_memorization import (
+    GroupedTargetBatchSampler,
     ModelEMA,
     TargetAdversary,
     TargetBalancedSampler,
@@ -48,6 +51,8 @@ from protein_hdf5_dataset import (
 LOSS_METRIC_NAMES = ("loss", "node_mse", "edge_attr_mse", "edge_presence_bce", "target_mse")
 LOSS_TERM_NAMES = ("node_mse", "edge_attr_mse", "edge_presence_bce", "target_mse")
 ADVERSARY_HISTORY_NAMES = ("target_adversary_ce", "target_adversary_acc", "target_adversary_coefficient")
+CAPRI_HISTORY_NAMES = ("capri_ce", "capri_acc")
+RANK_HISTORY_NAMES = ("rank_loss", "rank_pairs")
 VALIDATION_STEP_FIELDS = ("epoch", "global_step", "end_of_epoch", "ema", "val_target_mse",
                           "val_macro_target_mse", "val_macro_bin_mse", "saved")
 NODE_FEATURE_SET_CHOICES = {
@@ -277,7 +282,7 @@ def save_target_split_manifest(
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="ascii")
 
 
-def make_history_fieldnames(adversary: bool = False) -> list[str]:
+def make_history_fieldnames(adversary: bool = False, capri: bool = False, rank: bool = False) -> list[str]:
     fieldnames = ["epoch"]
     for split_name in ("train", "val", "test"):
         fieldnames.extend(f"{split_name}_{metric_name}" for metric_name in LOSS_METRIC_NAMES)
@@ -288,6 +293,10 @@ def make_history_fieldnames(adversary: bool = False) -> list[str]:
     fieldnames.extend(f"train_weighted_{term_name}" for term_name in LOSS_TERM_NAMES)
     if adversary:
         fieldnames.extend(f"train_{name}" for name in ADVERSARY_HISTORY_NAMES)
+    if capri:
+        fieldnames.extend(f"{split}_{name}" for split in ("train", "val") for name in CAPRI_HISTORY_NAMES)
+    if rank:
+        fieldnames.extend(f"train_{name}" for name in RANK_HISTORY_NAMES)
     return fieldnames
 
 
@@ -303,14 +312,20 @@ def flatten_history_row(epoch: int, metrics_by_split: dict[str, dict[str, float]
     for term_name in LOSS_TERM_NAMES:
         row[f"weight_{term_name}"] = train_metrics.get(f"weight_{term_name}", 0.0)
         row[f"train_weighted_{term_name}"] = train_metrics.get(f"weighted_{term_name}", 0.0)
-    for name in ADVERSARY_HISTORY_NAMES:
+    for name in ADVERSARY_HISTORY_NAMES + CAPRI_HISTORY_NAMES + RANK_HISTORY_NAMES:
         if name in train_metrics:
             row[f"train_{name}"] = train_metrics[name]
+    for name in CAPRI_HISTORY_NAMES:
+        if name in metrics_by_split.get("val", {}):
+            row[f"val_{name}"] = metrics_by_split["val"][name]
     return row
 
 
-def collect_prediction_rows(model, loader, device, args, node_feature_set: str, node_features: tuple[str, ...]):
+def collect_prediction_rows(model, loader, device, args, node_feature_set: str, node_features: tuple[str, ...],
+                            capri_head=None):
     model.eval()
+    if capri_head is not None:
+        capri_head.eval()
     rows = []
     with torch.no_grad():
         for batch in loader:
@@ -325,13 +340,16 @@ def collect_prediction_rows(model, loader, device, args, node_feature_set: str, 
             sample_indices = batch.sample_index.view(-1).detach().cpu().tolist()
             true_values = batch.y.float().view(-1).detach().cpu().tolist()
             predicted_values = quality_pred.detach().cpu().tolist()
+            capri_probs = (torch.softmax(capri_head(output["graph_embeddings"]), dim=1).cpu().tolist()
+                           if capri_head is not None else [None] * len(predicted_values))
 
-            for sample_index, hdf5_path, graph_name, true_value, predicted_value in zip(
+            for sample_index, hdf5_path, graph_name, true_value, predicted_value, probs in zip(
                 sample_indices,
                 hdf5_paths,
                 graph_names,
                 true_values,
                 predicted_values,
+                capri_probs,
                 strict=True,
             ):
                 rows.append(
@@ -345,6 +363,7 @@ def collect_prediction_rows(model, loader, device, args, node_feature_set: str, 
                         "predicted_target": float(predicted_value),
                         "node_feature_set": node_feature_set,
                         "node_features": ",".join(node_features),
+                        **({f"p_{name}": float(v) for name, v in zip(CAPRI_CLASSES, probs)} if probs else {}),
                     }
                 )
     return rows
@@ -362,6 +381,8 @@ def save_prediction_rows(output_path: Path, rows: list[dict[str, object]]) -> No
         "node_feature_set",
         "node_features",
     ]
+    if rows:
+        fieldnames.extend(name for name in rows[0] if name not in fieldnames)
     with output_path.open("w", newline="", encoding="ascii") as output_file:
         writer = csv.DictWriter(output_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -502,9 +523,15 @@ def compute_gate_loss(model, batch, output, args, balancer=None, update_balancer
         losses["edge_presence_bce"] = output["node_recon"].new_tensor(0.0)
 
     if getattr(batch, "y", None) is not None and output["quality_pred"] is not None:
-        losses["target_mse"] = weighted_dockq_mse(
-            output["quality_pred"], batch.y.float(),
-            getattr(args, "dockq_bin_weights", None) if update_balancer else None)
+        if update_balancer and getattr(args, "_hinge", None) is not None:
+            hinge = args._hinge
+            losses["target_mse"] = hinge_dockq_mse(
+                output["quality_pred"], batch.y.float(), hinge["beta"], hinge["start"], hinge["normalizer"],
+                use_prediction=args.dockq_range_weighting == "hinge-max")
+        else:
+            losses["target_mse"] = weighted_dockq_mse(
+                output["quality_pred"], batch.y.float(),
+                getattr(args, "dockq_bin_weights", None) if update_balancer else None)
     else:
         losses["target_mse"] = output["node_recon"].new_tensor(0.0)
 
@@ -560,10 +587,11 @@ class TrainingState(SimpleNamespace):
 
 
 def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None, scheduler=None,
-              adversary=None, state=None, ema=None, step_callback=None) -> dict[str, float]:
+              adversary=None, state=None, ema=None, step_callback=None, capri_head=None) -> dict[str, float]:
     model.train(train)
-    if adversary is not None:
-        adversary.train(train)
+    for module in (adversary, capri_head):
+        if module is not None:
+            module.train(train)
     totals: dict[str, float] = {}
     num_batches = 0
     truth, predictions, targets = [], [], []
@@ -596,6 +624,21 @@ def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None
                 metrics["target_adversary_ce"] = float(adv_ce.detach().cpu())
                 metrics["target_adversary_acc"] = adv_acc
                 metrics["target_adversary_coefficient"] = coefficient
+            if capri_head is not None:
+                capri_logits = capri_head(output["graph_embeddings"])
+                capri_labels = capri_class(batch.y.float())
+                capri_ce = F.cross_entropy(capri_logits, capri_labels)
+                if train:
+                    loss = loss + args.capri_head_weight * capri_ce
+                metrics["capri_ce"] = float(capri_ce.detach().cpu())
+                metrics["capri_acc"] = float((capri_logits.argmax(dim=1) == capri_labels).float().mean().cpu())
+            if train and getattr(args, "rank_loss_weight", 0):
+                groups = torch.tensor([state.target_index[Path(p).stem] for p in batch.hdf5_path], device=device)
+                rank_loss, n_pairs = pairwise_rank_loss(output["quality_pred"], batch.y.float(), groups,
+                                                        args.dockq_hinge_start, args.rank_temperature)
+                loss = loss + args.rank_loss_weight * rank_loss
+                metrics["rank_loss"] = float(rank_loss.detach().cpu())
+                metrics["rank_pairs"] = n_pairs
             if train:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(state.parameters if state is not None else model.parameters(),
@@ -611,8 +654,9 @@ def run_epoch(model, loader, optimizer, device, args, train: bool, balancer=None
                             and state.global_step % args.val_every_steps == 0):
                         step_callback()
                         model.train(True)
-                        if adversary is not None:
-                            adversary.train(True)
+                        for module in (adversary, capri_head):
+                            if module is not None:
+                                module.train(True)
 
         for name, value in metrics.items():
             totals[name] = totals.get(name, 0.0) + value
@@ -825,7 +869,13 @@ def main() -> None:
     parser.add_argument("--export-training-predictions", action="store_true")
     parser.add_argument("--cpu-threads", type=int, default=None)
     parser.add_argument("--reconstruction-lambda", type=float, default=1.0)
-    parser.add_argument("--dockq-range-weighting", choices=("none", "inverse-sqrt"), default="none")
+    parser.add_argument("--dockq-range-weighting", choices=("none", "inverse-sqrt", "hinge", "hinge-max"), default="none",
+        help="Training-only DockQ label weighting. 'hinge': weight 1 below --dockq-hinge-start, rising linearly to "
+             "--dockq-hinge-beta at DockQ 1, normalized to mean 1 over training labels. 'hinge-max': the same weight "
+             "evaluated at max(true, predicted) so confident false highs are penalized as well.")
+    parser.add_argument("--dockq-hinge-beta", type=float, default=5.0)
+    parser.add_argument("--dockq-hinge-start", type=float, default=0.23,
+        help="CAPRI 'acceptable' threshold; also the minimum DockQ of a pair for --rank-loss-weight.")
     parser.add_argument("--dockq-weight-cap", type=float, default=3.0,
                         help="Maximum ratio between largest and smallest training bin weights")
     parser.add_argument("--dockq-range-diagnostics", action="store_true",
@@ -847,7 +897,31 @@ def main() -> None:
         help="Target-balanced epochs: draw this many training decoys per target each epoch (0 = all, shuffled).")
     anti.add_argument("--ema-decay", type=float, default=0.0,
         help="Validate and checkpoint an exponential moving average of the weights with this decay (0 = off).")
+    dockq = parser.add_argument_group("high-DockQ objectives")
+    dockq.add_argument("--capri-head-weight", type=float, default=0.0,
+        help="Weight of an auxiliary CAPRI-class head (softmax over incorrect/acceptable/medium/high, cross-entropy) "
+             "on the graph embedding, trained alongside the DockQ MSE (0 = off).")
+    dockq.add_argument("--rank-loss-weight", type=float, default=0.0,
+        help="Weight of a within-target pairwise ranking loss on the DockQ prediction (0 = off); needs "
+             "--targets-per-batch so batches contain several decoys per target.")
+    dockq.add_argument("--rank-temperature", type=float, default=0.1,
+        help="DockQ-difference scale of the ranking logistic: predicted gaps of this size count as confident.")
+    dockq.add_argument("--targets-per-batch", type=int, default=0,
+        help="Build each training batch from this many targets (batch-size / this decoys each); 0 = plain shuffle.")
     args = parser.parse_args()
+    if not all(math.isfinite(v) and v >= 0 for v in (args.capri_head_weight, args.rank_loss_weight)):
+        parser.error("capri-head-weight and rank-loss-weight must be finite and nonnegative")
+    if args.rank_loss_weight and not args.targets_per_batch:
+        parser.error("rank-loss-weight requires --targets-per-batch")
+    if args.targets_per_batch and (args.targets_per_batch < 1 or args.batch_size % args.targets_per_batch
+                                   or args.batch_size // args.targets_per_batch < 2):
+        parser.error("targets-per-batch must divide batch-size with at least 2 decoys per target")
+    if args.capri_head_weight and args.ema_decay:
+        parser.error("capri-head-weight with ema-decay is unsupported: EMA averages only the GATE model")
+    if args.targets_per_batch and args.decoys_per_target:
+        parser.error("targets-per-batch and decoys-per-target are separate samplers; use one")
+    if args.rank_temperature <= 0 or not 0 <= args.dockq_hinge_start < 1 or args.dockq_hinge_beta < 1:
+        parser.error("rank-temperature must be positive, dockq-hinge-start in [0, 1), dockq-hinge-beta >= 1")
     if args.val_every_steps < 0 or args.decoys_per_target < 0:
         parser.error("val-every-steps and decoys-per-target must be nonnegative")
     if not math.isfinite(args.target_adversary_weight) or args.target_adversary_weight < 0:
@@ -859,11 +933,12 @@ def main() -> None:
     # Step validation is measurement only and works with either loss-weight mode; the
     # training interventions were built and tested against the fixed-weight objective.
     anti_memorization_requested = (args.dockq_head_mode != "joint" or args.target_adversary_weight
-        or augmentation_enabled(args) or args.decoys_per_target or args.ema_decay)
+        or augmentation_enabled(args) or args.decoys_per_target or args.ema_decay
+        or args.capri_head_weight or args.rank_loss_weight or args.targets_per_batch)
     if anti_memorization_requested and args.architecture != "gat":
-        parser.error("anti-memorization options are implemented for the GAT architecture only")
+        parser.error("anti-memorization and high-DockQ options are implemented for the GAT architecture only")
     if anti_memorization_requested and (args.loss_weight_mode != "fixed" or args.checkpoint_metric != "target_mse"):
-        parser.error("anti-memorization options require fixed loss weights and --checkpoint-metric target_mse")
+        parser.error("anti-memorization and high-DockQ options require fixed loss weights and --checkpoint-metric target_mse")
     if args.val_every_steps and args.checkpoint_metric != "target_mse":
         parser.error("val-every-steps requires --checkpoint-metric target_mse")
     if (anti_memorization_requested or args.val_every_steps) and (args.initialize_checkpoint or args.evaluation_only):
@@ -1031,10 +1106,19 @@ def main() -> None:
         f"num_workers={args.num_workers}, worker_start_method={worker_start_method}, "
         f"pin_memory={'yes' if device.type == 'cuda' else 'no'}..."
     )
-    if args.decoys_per_target:
-        groups: dict[Path, list[int]] = {}
-        for position, index in enumerate(split_indices["train"]):
-            groups.setdefault(dataset.samples[index].path, []).append(position)
+    train_groups: dict[Path, list[int]] = {}
+    for position, index in enumerate(split_indices["train"]):
+        train_groups.setdefault(dataset.samples[index].path, []).append(position)
+    if args.targets_per_batch:
+        kwargs = make_dataloader_kwargs(args, device, shuffle=False)
+        kwargs.pop("batch_size"); kwargs.pop("shuffle")
+        batch_sampler = GroupedTargetBatchSampler([train_groups[path] for path in sorted(train_groups)],
+                                                  args.batch_size, args.targets_per_batch, seed=args.seed)
+        train_loader = DataLoader(train_dataset, batch_sampler=batch_sampler, **kwargs)
+        print(f"Grouped batches: {args.targets_per_batch} targets x {args.batch_size // args.targets_per_batch} "
+              f"decoys; {len(batch_sampler)} batches per epoch")
+    elif args.decoys_per_target:
+        groups = train_groups
         train_sampler = TargetBalancedSampler([groups[path] for path in sorted(groups)],
                                               args.decoys_per_target, seed=args.seed)
         train_loader = DataLoader(train_dataset, sampler=train_sampler,
@@ -1048,8 +1132,15 @@ def main() -> None:
     print("Dataloaders ready.")
 
     if args.dockq_range_diagnostics:
-        profile = fit_range_weights(read_training_labels(dataset, split_indices["train"]), args.dockq_weight_cap, args.dockq_weight_exponent)
-        args.dockq_bin_weights = profile["weights"] if args.dockq_range_weighting != "none" else None
+        training_labels = read_training_labels(dataset, split_indices["train"])
+        profile = fit_range_weights(training_labels, args.dockq_weight_cap, args.dockq_weight_exponent)
+        args.dockq_bin_weights = profile["weights"] if args.dockq_range_weighting == "inverse-sqrt" else None
+        args._hinge = None
+        if args.dockq_range_weighting in ("hinge", "hinge-max"):
+            args._hinge = fit_hinge_normalizer(training_labels, args.dockq_hinge_beta, args.dockq_hinge_start)
+            profile["hinge"] = {**args._hinge, "mode": args.dockq_range_weighting}
+            print(f"DockQ hinge weighting ({args.dockq_range_weighting}): beta={args.dockq_hinge_beta:g} from "
+                  f"DockQ {args.dockq_hinge_start:g}, normalizer {args._hinge['normalizer']:.4f}", flush=True)
         (output_dir / "dockq_training_distribution.json").write_text(json.dumps(profile, indent=2) + "\n")
         print(f"DockQ training bins: {profile['counts']}; active weights: {args.dockq_bin_weights}", flush=True)
         (output_dir / "dockq_epoch_metrics.jsonl").write_text("")
@@ -1066,6 +1157,8 @@ def main() -> None:
                 raise ValueError(f"Initialization target split differs: {split_name}")
         model.load_state_dict(initial_checkpoint["model_state_dict"], strict=True)
 
+    capri_head = None
+
     def export_diagnostic_predictions():
         report = {}
         loaders = {"validation": val_loader}
@@ -1073,7 +1166,7 @@ def main() -> None:
             loaders["training"] = DataLoader(train_dataset, **make_dataloader_kwargs(args, device, shuffle=False))
         for split_name, loader in loaders.items():
             rows = collect_prediction_rows(model, loader, device, args,
-                node_feature_set=args.node_feature_set, node_features=dataset.node_features)
+                node_feature_set=args.node_feature_set, node_features=dataset.node_features, capri_head=capri_head)
             save_prediction_rows(output_dir / f"{split_name}_predictions.csv", rows)
             if args.dockq_range_diagnostics:
                 report[split_name] = prediction_report([r['true_target'] for r in rows],
@@ -1100,7 +1193,13 @@ def main() -> None:
         adversary = TargetAdversary(args.latent_dim, args.hidden_dim, len(target_index), args.dropout).to(device)
         print(f"Target adversary: {len(target_index)} training targets (chance accuracy "
               f"{1 / len(target_index):.4f}), weight {args.target_adversary_weight:g}, DANN ramp")
-    trainable = list(model.parameters()) + (list(adversary.parameters()) if adversary is not None else [])
+    if args.capri_head_weight > 0:
+        capri_head = CapriHead(args.latent_dim, args.hidden_dim, args.dropout).to(device)
+        print(f"CAPRI head: 4 classes (edges 0.23/0.49/0.80), cross-entropy weight {args.capri_head_weight:g}")
+    if args.rank_loss_weight > 0:
+        print(f"Within-target ranking loss: weight {args.rank_loss_weight:g}, pairs with max DockQ >= "
+              f"{args.dockq_hinge_start:g}, temperature {args.rank_temperature:g}")
+    trainable = list(model.parameters()) + [p for m in (adversary, capri_head) if m is not None for p in m.parameters()]
     optimizer = torch.optim.AdamW(trainable, lr=args.lr, weight_decay=args.weight_decay)
     scheduler = build_lr_scheduler(optimizer, args, steps_per_epoch=len(train_loader))
     ema = ModelEMA(model, args.ema_decay) if args.ema_decay else None
@@ -1197,6 +1296,8 @@ def main() -> None:
                 for split_name, paths in split_paths.items()
             },
         }
+        if capri_head is not None:
+            payload["capri_head_state_dict"] = capri_head.state_dict()
         if adversary is not None:
             payload["target_adversary_state_dict"] = adversary.state_dict()
             payload["target_adversary_targets"] = sorted(target_index, key=target_index.get)
@@ -1211,7 +1312,8 @@ def main() -> None:
         if state.last_validated_step == state.global_step and state.last_val_metrics is not None:
             return state.last_val_metrics, False
         with (ema.applied(model) if ema is not None else nullcontext()), torch.no_grad():
-            val_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer)
+            val_metrics = run_epoch(model, val_loader, optimizer, device, args, train=False, balancer=balancer,
+                                    capri_head=capri_head)
             saved = val_metrics[args.checkpoint_metric] < state.best_val_metric
             if saved:
                 state.best_val_metric = val_metrics[args.checkpoint_metric]
@@ -1229,7 +1331,8 @@ def main() -> None:
         return val_metrics, saved
 
     with history_path.open("w", newline="", encoding="ascii") as history_file:
-        writer = csv.DictWriter(history_file, fieldnames=make_history_fieldnames(adversary is not None))
+        writer = csv.DictWriter(history_file, fieldnames=make_history_fieldnames(
+            adversary is not None, capri=capri_head is not None, rank=bool(args.rank_loss_weight)))
         writer.writeheader()
 
         for epoch in range(1, args.epochs + 1):
@@ -1237,7 +1340,7 @@ def main() -> None:
             epoch_start = time.monotonic()
             train_metrics = run_epoch(
                 model, train_loader, optimizer, device, args, train=True, balancer=balancer, scheduler=scheduler,
-                adversary=adversary, state=state, ema=ema,
+                adversary=adversary, state=state, ema=ema, capri_head=capri_head,
                 step_callback=lambda epoch=epoch: validate(epoch, end_of_epoch=False),
             )
             val_metrics, saved = validate(epoch, end_of_epoch=True)
@@ -1279,6 +1382,8 @@ def main() -> None:
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
+    if capri_head is not None:
+        capri_head.load_state_dict(checkpoint["capri_head_state_dict"])
     if args.no_test_evaluation:
         export_diagnostic_predictions()
         print(f'Diagnostic run complete; best checkpoint: {checkpoint_path}; no test evaluation.')
@@ -1290,6 +1395,7 @@ def main() -> None:
         args,
         node_feature_set=args.node_feature_set,
         node_features=dataset.node_features,
+        capri_head=capri_head,
     )
     save_prediction_rows(test_predictions_path, test_prediction_rows)
 

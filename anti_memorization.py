@@ -197,3 +197,43 @@ class ModelEMA:
             yield
         finally:
             model.load_state_dict(backup, strict=True)
+
+
+class GroupedTargetBatchSampler(Sampler[list[int]]):
+    """Batches made of ``targets_per_batch`` chunks of decoys, each chunk from one target.
+
+    Every training decoy is used once per epoch, as with ordinary shuffling, but each batch contains
+    several decoys of the same target so a within-target ranking loss has pairs to compare. ``groups``
+    lists, per target, the positions of its decoys in the dataset the loader indexes.
+    """
+
+    def __init__(self, groups: list[list[int]], batch_size: int, targets_per_batch: int, seed: int) -> None:
+        if targets_per_batch < 1 or batch_size % targets_per_batch:
+            raise ValueError("batch_size must be a positive multiple of targets_per_batch")
+        if not groups or any(not group for group in groups):
+            raise ValueError("Every target group must be nonempty")
+        self.groups = [list(group) for group in groups]
+        self.chunk = batch_size // targets_per_batch
+        self.targets_per_batch = targets_per_batch
+        self.seed = seed
+        self.epoch = 0
+
+    def _chunks(self, rng: random.Random) -> list[list[int]]:
+        chunks = []
+        for group in self.groups:
+            order = group[:]
+            rng.shuffle(order)
+            chunks.extend(order[k:k + self.chunk] for k in range(0, len(order), self.chunk))
+        rng.shuffle(chunks)
+        return chunks
+
+    def __len__(self) -> int:
+        chunks = sum(math.ceil(len(group) / self.chunk) for group in self.groups)
+        return math.ceil(chunks / self.targets_per_batch)
+
+    def __iter__(self):
+        rng = random.Random(self.seed * 1_000_003 + self.epoch)
+        self.epoch += 1
+        chunks = self._chunks(rng)
+        for k in range(0, len(chunks), self.targets_per_batch):
+            yield [index for chunk in chunks[k:k + self.targets_per_batch] for index in chunk]

@@ -226,3 +226,104 @@ def test_intervention_and_schedule_guards(tmp_path, bad):
     cmd = [sys.executable, "train_gate.py", "--data", str(tmp_path), "--checkpoint-metric", "target_mse", *bad]
     result = subprocess.run(cmd, text=True, capture_output=True)
     assert result.returncode != 0 and "train_gate.py: error:" in result.stderr
+
+
+# ---- high-DockQ objectives: hinge weighting, CAPRI head, within-target ranking ----
+
+from dockq_objectives import capri_class, fit_hinge_normalizer, hinge_dockq_mse, hinge_weights, pairwise_rank_loss
+from anti_memorization import GroupedTargetBatchSampler
+
+
+def test_hinge_weights_shape_and_normalization():
+    y = torch.tensor([0.0, 0.1, 0.23, 0.615, 1.0])
+    assert torch.allclose(hinge_weights(y, beta=5, start=0.23), torch.tensor([1, 1, 1, 3, 5.0]))
+    labels = np.array([0.0, 0.1, 0.9, 1.0])
+    norm = fit_hinge_normalizer(labels, 5, 0.23)['normalizer']
+    assert np.mean(hinge_weights(labels, 5, 0.23) / norm) == pytest.approx(1.0)
+    with pytest.raises(ValueError):
+        hinge_weights(y, beta=0.5)
+
+
+def test_hinge_max_also_penalizes_confident_false_highs():
+    target = torch.tensor([0.05]); high_guess = torch.tensor([0.95])
+    plain = hinge_dockq_mse(high_guess, target, 5, 0.23, 1.0, use_prediction=False)
+    maxed = hinge_dockq_mse(high_guess, target, 5, 0.23, 1.0, use_prediction=True)
+    assert plain == pytest.approx(0.81) and maxed == pytest.approx(0.81 * float(hinge_weights(torch.tensor(0.95), 5)))
+    pred = torch.tensor([0.95], requires_grad=True)
+    hinge_dockq_mse(pred, target, 5, 0.23, 1.0, use_prediction=True).backward()
+    assert pred.grad.item() == pytest.approx(2 * 0.9 * float(hinge_weights(torch.tensor(0.95), 5)))  # weight detached
+
+
+def test_capri_classes_use_capri_thresholds():
+    assert capri_class(torch.tensor([0.0, 0.229, 0.23, 0.489, 0.49, 0.799, 0.8, 1.0])).tolist() == [0, 0, 1, 1, 2, 2, 3, 3]
+
+
+def test_rank_loss_uses_only_same_target_pairs_above_start_and_prefers_correct_order():
+    target = torch.tensor([0.9, 0.3, 0.1, 0.05, 0.8])
+    groups = torch.tensor([0, 0, 0, 0, 1])
+    good = torch.tensor([0.8, 0.4, 0.2, 0.1, 0.0], requires_grad=True)
+    loss_good, pairs = pairwise_rank_loss(good, target, groups, start=0.23, temperature=0.1)
+    # same-target pairs with max >= 0.23: (0.9,0.3) (0.9,0.1) (0.9,0.05) (0.3,0.1) (0.3,0.05); (0.1,0.05) excluded
+    assert pairs == 5
+    reversed_order = torch.tensor([0.1, 0.2, 0.4, 0.8, 0.0])
+    loss_bad, _ = pairwise_rank_loss(reversed_order, target, groups, start=0.23, temperature=0.1)
+    assert loss_bad > loss_good
+    loss_good.backward()
+    assert good.grad[4] == 0  # the lone decoy of target 1 has no pair
+    none, n = pairwise_rank_loss(good.detach(), target, torch.arange(5), start=0.23)
+    assert n == 0 and float(none) == 0
+
+
+def test_grouped_batches_cover_every_decoy_once_with_few_targets_per_batch():
+    groups = [list(range(0, 10)), list(range(10, 17)), list(range(17, 40))]
+    sampler = GroupedTargetBatchSampler(groups, batch_size=8, targets_per_batch=2, seed=3)
+    batches = list(sampler)
+    flat = [i for b in batches for i in b]
+    assert sorted(flat) == list(range(40)) and len(batches) == len(sampler)
+    owner = {i: g for g, members in enumerate(groups) for i in members}
+    assert all(len({owner[i] for i in b}) <= 2 for b in batches)
+    assert batches != list(sampler)  # reshuffled next epoch
+
+
+@pytest.mark.parametrize("arm", [
+    ["--dockq-range-weighting", "hinge", "--dockq-hinge-beta", "5"],
+    ["--dockq-range-weighting", "hinge-max", "--dockq-hinge-beta", "5"],
+    ["--capri-head-weight", "0.2"],
+    ["--rank-loss-weight", "0.1", "--targets-per-batch", "1"],
+])
+def test_high_dockq_arms_train_and_export(tmp_path, arm):
+    out = tmp_path / "run"
+    cmd = [sys.executable, "train_gate.py", "--data", str(make_data(tmp_path)), "--output-dir", str(out),
+           "--val-every-steps", "1", *BASE, *arm]
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    steps = pd.read_csv(out / "validation_steps.csv")
+    predictions = pd.read_csv(out / "validation_predictions.csv")
+    history = pd.read_csv(out / "loss_history.csv")
+    mse = np.mean((predictions.true_target - predictions.predicted_target) ** 2)
+    assert mse == pytest.approx(steps.val_target_mse.min(), rel=1e-5, abs=1e-7)
+    if "--capri-head-weight" in arm:
+        probs = predictions[["p_incorrect", "p_acceptable", "p_medium", "p_high"]]
+        assert np.allclose(probs.sum(axis=1), 1)
+        assert {"train_capri_ce", "val_capri_acc"} <= set(history.columns)
+        assert "capri_head_state_dict" in torch.load(out / "gate_model.pt", map_location="cpu", weights_only=False)
+    else:
+        assert "p_high" not in predictions.columns
+    if "--rank-loss-weight" in arm:
+        assert (history.train_rank_pairs > 0).all()
+    if "hinge" in " ".join(arm):
+        import json
+        profile = json.loads((out / "dockq_training_distribution.json").read_text())
+        assert profile["hinge"]["beta"] == 5 and profile["hinge"]["normalizer"] > 1
+
+
+@pytest.mark.parametrize("bad", [["--rank-loss-weight", "0.1"],
+                                 ["--targets-per-batch", "3", "--batch-size", "16"],
+                                 ["--capri-head-weight", "0.2", "--ema-decay", "0.9"],
+                                 ["--dockq-range-weighting", "hinge"],
+                                 ["--capri-head-weight", "0.2", "--loss-weight-mode", "shares"]])
+def test_high_dockq_guards(tmp_path, bad):
+    cmd = [sys.executable, "train_gate.py", "--data", str(tmp_path), "--checkpoint-metric", "target_mse",
+           "--loss-weight-mode", "fixed", *bad]
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    assert result.returncode != 0 and "train_gate.py: error:" in result.stderr
