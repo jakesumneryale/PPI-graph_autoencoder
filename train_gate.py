@@ -1384,10 +1384,12 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     if capri_head is not None:
         capri_head.load_state_dict(checkpoint["capri_head_state_dict"])
+    # Validation predictions/metrics from the selected checkpoint are exported in every mode.
+    export_diagnostic_predictions()
     if args.no_test_evaluation:
-        export_diagnostic_predictions()
         print(f'Diagnostic run complete; best checkpoint: {checkpoint_path}; no test evaluation.')
         return
+    # The test split is touched only here: once, with the checkpoint chosen on validation DockQ MSE.
     test_prediction_rows = collect_prediction_rows(
         model,
         test_loader,
@@ -1398,6 +1400,17 @@ def main() -> None:
         capri_head=capri_head,
     )
     save_prediction_rows(test_predictions_path, test_prediction_rows)
+    if args.dockq_range_diagnostics:
+        metrics_path = output_dir / "prediction_metrics.json"
+        report = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
+        report["test"] = prediction_report([r["true_target"] for r in test_prediction_rows],
+                                           [r["predicted_target"] for r in test_prediction_rows],
+                                           [r["target_id"] for r in test_prediction_rows])
+        report["selected_checkpoint"] = dict(best_epoch=checkpoint["best_epoch"], best_step=checkpoint.get("best_step"),
+                                             validation_target_mse=checkpoint["best_metric_value"])
+        metrics_path.write_text(json.dumps(report, indent=2) + "\n")
+        print(f"Test DockQ MSE at the selected checkpoint (epoch {checkpoint['best_epoch']}): "
+              f"{report['test']['pooled_mse']:.5f}", flush=True)
 
     reconstruction_eval_args = SimpleNamespace(
         cluster=args.cluster,

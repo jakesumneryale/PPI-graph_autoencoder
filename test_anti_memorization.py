@@ -327,3 +327,25 @@ def test_high_dockq_guards(tmp_path, bad):
            "--loss-weight-mode", "fixed", *bad]
     result = subprocess.run(cmd, text=True, capture_output=True)
     assert result.returncode != 0 and "train_gate.py: error:" in result.stderr
+
+
+def test_selected_checkpoint_is_evaluated_once_on_the_test_split(tmp_path):
+    import json
+    out = tmp_path / "run"
+    base = [a for a in BASE if a != "--no-test-evaluation"]
+    cmd = [sys.executable, "train_gate.py", "--data", str(make_data(tmp_path)), "--output-dir", str(out),
+           "--validation-only-during-training", "--val-every-steps", "1", *base,
+           "--rank-loss-weight", "0.1", "--targets-per-batch", "1", "--capri-head-weight", "0.2"]
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    history = pd.read_csv(out / "loss_history.csv")
+    assert history.filter(regex="^test_").isna().all().all()  # sealed during training
+    steps = pd.read_csv(out / "validation_steps.csv")
+    val = pd.read_csv(out / "validation_predictions.csv")
+    test = pd.read_csv(out / "test_predictions.csv")
+    assert np.mean((val.true_target - val.predicted_target) ** 2) == pytest.approx(steps.val_target_mse.min(), rel=1e-5)
+    assert set(test.target_id).isdisjoint(set(val.target_id)) and "p_high" in test.columns
+    report = json.loads((out / "prediction_metrics.json").read_text())
+    assert report["test"]["pooled_mse"] == pytest.approx(np.mean((test.true_target - test.predicted_target) ** 2))
+    assert report["selected_checkpoint"]["validation_target_mse"] == pytest.approx(steps.val_target_mse.min(), rel=1e-5)
+    assert (out / "reconstruction_summary.csv").exists()

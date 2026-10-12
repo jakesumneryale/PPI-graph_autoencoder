@@ -494,6 +494,196 @@ for hnd in leg.legend_handles: hnd.set_alpha(1)
 save(fig, f'observed_vs_predicted_per_target_seed{PANEL_SEED}')
 ''')
 
+md(r'''## Previous best vs new best
+
+**Previous best** is the control A from the anti-memorization experiment. **New best** is the cause-ablation
+configuration with the lowest mean best-checkpoint validation DockQ MSE across its three seeds (selected in the
+code below). Both use the same validation cohort; the comparisons below use their best checkpoints and full
+validation histories.''')
+
+code(r'''
+import shutil
+if shutil.which('latex') is None:
+    raise RuntimeError('LaTeX is required to render these figures in Computer Modern.')
+candidates = metrics[(metrics.config != 'A_control') & metrics.best_full.notna()].groupby('config', observed=True)
+complete = candidates.filter(lambda g: len(g) == len(SEEDS)).groupby('config', observed=True).best_full.mean()
+NEW_BEST = complete.idxmin()
+PAIR = {'previous': 'A_control', 'new': NEW_BEST}
+PAIR_LABEL = {'previous': 'Previous best', 'new': 'New best'}
+PAIR_COLOR = {'previous': 'black', 'new': '#247ba0'}
+BAR_COLOR = {'previous': 'black', 'new': 'lightgray'}
+best_mse = metrics.set_index(['config', 'seed']).best_full
+print(f"Previous best = A control (anti_memorization_full): mean best validation MSE "
+      f"{best_mse.loc['A_control'].mean():.4f}")
+print(f"New best = {NEW_BEST} ({LABEL[NEW_BEST]}): mean best validation MSE {complete.min():.4f}")
+display(complete.sort_values().round(4).to_frame('mean best validation MSE (3 seeds)'))
+
+STYLE = {'text.usetex': True, 'font.family': 'serif', 'font.serif': ['Computer Modern Roman'],
+         'mathtext.fontset': 'cm', 'axes.spines.top': True, 'axes.spines.right': True}
+
+def target_rho(pr):
+    return pr.groupby('target_id')[['true_target', 'predicted_target']].apply(
+        lambda g: spearmanr(g.true_target, g.predicted_target).statistic)
+''')
+
+md(r'''### Observed vs predicted DockQ by validation target
+
+Seed 17 for both models, every validation target. Each translucent circle is one decoy; previous best in
+black, new best in blue. All panels share axis limits; the dashed line is perfect agreement; the annotation
+gives each target's within-target Spearman $\rho$ for both models.''')
+
+code(r'''
+PANEL_SEED = 17
+targets = sorted(reference.target_id.unique())
+ncols = 4
+nrows = int(np.ceil(len(targets) / ncols))
+frames = {k: predictions[cfg, PANEL_SEED] for k, cfg in PAIR.items()}
+axis_low = min(0.0, *(f.predicted_target.min() for f in frames.values())) - 0.02
+axis_high = max(1.0, *(f.predicted_target.max() for f in frames.values())) + 0.02
+with mpl.rc_context({**STYLE, 'axes.labelsize': 24, 'xtick.labelsize': 20, 'ytick.labelsize': 20}):
+    fig, axes = plt.subplots(nrows, ncols, figsize=(22, 5.6 * nrows), sharex=True, sharey=True,
+                             constrained_layout=True)
+    for ax, target in zip(np.atleast_1d(axes).flat, targets):
+        rhos = {}
+        for key, frame in frames.items():
+            group = frame.loc[frame.target_id.eq(target)]
+            rhos[key] = spearmanr(group.true_target, group.predicted_target).statistic
+            ax.scatter(group.true_target, group.predicted_target, color=PAIR_COLOR[key], marker='o', alpha=0.30,
+                       s=22, edgecolors='none', rasterized=True, label=PAIR_LABEL[key])
+        ax.plot([axis_low, axis_high], [axis_low, axis_high], color='0.45', linestyle='--', linewidth=1.3)
+        annotation = (target + '\n' + rf"$\rho_{{\mathrm{{previous}}}} = {rhos['previous']:.3f}$"
+                      + '\n' + rf"$\rho_{{\mathrm{{new}}}} = {rhos['new']:.3f}$")
+        ax.text(0.04, 0.96, annotation, transform=ax.transAxes, ha='left', va='top', fontsize=23,
+                bbox=dict(facecolor='white', edgecolor='none', alpha=0.8, pad=2))
+        ax.set(xlim=(axis_low, axis_high), ylim=(axis_low, axis_high),
+               xlabel='Observed DockQ', ylabel='Predicted DockQ')
+        ax.set_xticks([0, 0.5, 1.0]); ax.set_yticks([0, 0.5, 1.0])
+        ax.set_aspect('equal', adjustable='box')
+        ax.tick_params(labelbottom=True, labelleft=True, length=6, width=1.3, pad=6)
+        ax.xaxis.labelpad = 9; ax.yaxis.labelpad = 9
+        for spine in ax.spines.values():
+            spine.set_visible(True); spine.set_linewidth(1.3)
+    for ax in list(np.atleast_1d(axes).flat)[len(targets):]:
+        ax.set_visible(False)
+    handles, labels = np.atleast_1d(axes).flat[0].get_legend_handles_labels()
+    legend = fig.legend(handles, labels, loc='outside upper center', ncol=2, fontsize=24, frameon=False,
+                        markerscale=2)
+    for handle in legend.legend_handles:
+        handle.set_alpha(1.0)
+    save(fig, f'previous_vs_new_best_observed_predicted_seed{PANEL_SEED}')
+''')
+
+md(r'''### Mean within-target Spearman $\rho$
+
+Each target weighted equally: Spearman $\rho$ is computed within each validation target and then averaged.
+Black: previous best; gray: new best. One pair of bars per training seed, plus the mean over seeds (error bars
+are seed SD).''')
+
+code(r'''
+rho_rows = []
+for key, cfg in PAIR.items():
+    for seed in SEEDS:
+        rho_rows.append(dict(model=key, seed=seed, macro_rho=target_rho(predictions[cfg, seed]).mean()))
+rho_table = pd.DataFrame(rho_rows)
+rho_table.to_csv(EXPORT / 'previous_vs_new_best_rho.csv', index=False)
+display(rho_table.pivot(index='seed', columns='model', values='macro_rho').round(4))
+
+with mpl.rc_context({**STYLE, 'axes.labelsize': 22, 'xtick.labelsize': 18, 'ytick.labelsize': 18,
+                     'legend.fontsize': 18}):
+    fig, ax = plt.subplots(figsize=(10, 6.5), constrained_layout=True)
+    groups = [f'Seed {seed}' for seed in SEEDS] + ['Mean']
+    positions = np.arange(len(groups)); bar_width = 0.36
+    for index, key in enumerate(PAIR):
+        sub = rho_table[rho_table.model == key].set_index('seed').loc[SEEDS, 'macro_rho'].to_numpy()
+        values = np.append(sub, sub.mean())
+        errors = [0] * len(SEEDS) + [sub.std(ddof=1)]
+        bars = ax.bar(positions + (index - 0.5) * bar_width, values, bar_width, yerr=errors, capsize=5,
+                      color=BAR_COLOR[key], edgecolor='black', linewidth=1.2, label=PAIR_LABEL[key],
+                      error_kw=dict(lw=1.3))
+        ax.bar_label(bars, labels=[f'{v:.3f}' for v in values], padding=5, fontsize=16)
+    ax.set_ylim(0, rho_table.macro_rho.max() * 1.22)
+    ax.set_xticks(positions, groups)
+    ax.set_xlabel('Training seed', labelpad=10)
+    ax.set_ylabel(r'$\langle \rho \rangle$', labelpad=10)
+    ax.tick_params(axis='both', width=1.1, length=5)
+    for spine in ax.spines.values():
+        spine.set_visible(True); spine.set_linewidth(1.1)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='outside upper center', ncol=2, frameon=False)
+    save(fig, 'previous_vs_new_best_rho_bars')
+''')
+
+md(r'''### Validation DockQ MSE during training
+
+Every validation (every 2,000 steps and at each epoch end) for the three seeds of each model: thin lines are
+individual seeds, thick lines the seed mean with a $\pm$1 SD band. Markers show each mean curve's minimum.''')
+
+code(r'''
+with mpl.rc_context({**STYLE, 'axes.labelsize': 22, 'xtick.labelsize': 18, 'ytick.labelsize': 18,
+                     'legend.fontsize': 18}):
+    fig, ax = plt.subplots(figsize=(12, 6.8), constrained_layout=True)
+    for key, cfg in PAIR.items():
+        s = steps[steps.config == cfg].copy()
+        s['epoch_float'] = s.global_step / steps_per_epoch
+        for seed in SEEDS:
+            r = s[s.seed == seed].sort_values('global_step')
+            ax.plot(r.epoch_float, r.val_target_mse, color=PAIR_COLOR[key], lw=0.9, alpha=0.35)
+        m = s.groupby('global_step').agg(x=('epoch_float', 'first'), y=('val_target_mse', 'mean'),
+                                         sd=('val_target_mse', 'std'))
+        ax.fill_between(m.x, m.y - m.sd, m.y + m.sd, color=PAIR_COLOR[key], alpha=0.15, linewidth=0)
+        ax.plot(m.x, m.y, color=PAIR_COLOR[key], lw=2.6, label=PAIR_LABEL[key])
+        i = m.y.idxmin()
+        ax.plot(m.x[i], m.y[i], marker='o', ms=11, color=PAIR_COLOR[key], markeredgecolor='white', mew=1.5, zorder=5)
+    ax.set_xlim(0, EPOCHS); ax.set_ylim(0.04, 0.08)
+    ax.set_xlabel('Epoch', labelpad=10); ax.set_ylabel('Validation DockQ MSE', labelpad=10)
+    ax.tick_params(axis='both', width=1.1, length=5)
+    for spine in ax.spines.values():
+        spine.set_visible(True); spine.set_linewidth(1.1)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='outside upper center', ncol=2, frameon=False)
+    save(fig, 'previous_vs_new_best_validation_mse')
+''')
+
+md(r'''### Learning-rate schedule
+
+The learning rate each model trained with, over the 20 epochs both actually ran: 1,000 linear warmup steps to
+the peak of $3\times10^{-4}$, then cosine decay towards 3\% of the peak over the schedule length (20 epochs for
+the previous best, 50 for the new best). Computed with the same formula as `build_lr_scheduler` in
+`train_gate.py`, using the runs' steps per epoch.''')
+
+code(r'''
+PEAK_LR, WARMUP_STEPS, FINAL_FRACTION = 3e-4, 1000, 0.03
+
+def lr_at(step, schedule_epochs):
+    total = steps_per_epoch * schedule_epochs
+    warmup = min(WARMUP_STEPS, total - 1)
+    factor = np.where(step < warmup, (step + 1) / warmup, 0.0)
+    progress = np.clip((step - warmup) / max(total - warmup, 1), 0, 1)
+    cosine = FINAL_FRACTION + (1 - FINAL_FRACTION) * 0.5 * (1 + np.cos(np.pi * progress))
+    return PEAK_LR * np.where(step < warmup, factor, cosine)
+
+step_grid = np.arange(0, EPOCHS * steps_per_epoch + 1, 50)
+schedule_epochs = {'previous': int(CONFIG.loc[PAIR['previous'], 'schedule']),
+                   'new': int(CONFIG.loc[PAIR['new'], 'schedule'])}
+with mpl.rc_context({**STYLE, 'axes.labelsize': 22, 'xtick.labelsize': 18, 'ytick.labelsize': 18,
+                     'legend.fontsize': 18}):
+    fig, ax = plt.subplots(figsize=(12, 6.8), constrained_layout=True)
+    for key in PAIR:
+        ax.plot(step_grid / steps_per_epoch, lr_at(step_grid, schedule_epochs[key]) * 1e4, color=PAIR_COLOR[key],
+                lw=2.8, label=f'{PAIR_LABEL[key]} ({schedule_epochs[key]}-epoch cosine)')
+    ax.set_xlim(0, EPOCHS); ax.set_ylim(0, PEAK_LR * 1e4 * 1.08)
+    ax.set_xlabel('Epoch', labelpad=10); ax.set_ylabel(r'Learning rate ($\times 10^{-4}$)', labelpad=10)
+    ax.tick_params(axis='both', width=1.1, length=5)
+    for spine in ax.spines.values():
+        spine.set_visible(True); spine.set_linewidth(1.1)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='outside upper center', ncol=2, frameon=False)
+    save(fig, 'previous_vs_new_best_learning_rate')
+for key in PAIR:
+    print(f"{PAIR_LABEL[key]}: LR at epochs 5/10/15/20 = "
+          + ', '.join(f'{lr_at(np.array(e * steps_per_epoch), schedule_epochs[key]):.2e}' for e in (5, 10, 15, 20)))
+''')
+
 md(r'''## Readout''')
 
 code(r'''
