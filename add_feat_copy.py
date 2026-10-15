@@ -7,13 +7,12 @@ import re
 from scipy.stats import spearmanr, pearsonr
 from os import listdir
 from os.path import isfile, join
-import create_protein_graph_structure as jk
-import bounded_voronoi_contacts_radical as voro
+import nb_scripts.create_protein_graph_structure as jk
+import nb_scripts.bounded_voronoi_contacts_radical as voro
 from numpy.linalg import norm
 import pickle
 import torch
 from torch_geometric import datasets
-from Dataset import graph_dataset
 from numpy.linalg import norm
 import os
 

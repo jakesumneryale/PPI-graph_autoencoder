@@ -9,8 +9,8 @@ import pandas as pd
 import re
 from os import listdir
 from os.path import isfile, join
-import create_protein_graph_structure as jk
-import bounded_voronoi_contacts_radical as voro
+import nb_scripts.create_protein_graph_structure as jk
+import nb_scripts.bounded_voronoi_contacts_radical as voro
 
 parser = argparse.ArgumentParser()
 #parser.add_argument('-d','--dir',help='Directory to file')

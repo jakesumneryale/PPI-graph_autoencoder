@@ -697,6 +697,8 @@ def main() -> None:
         default=None,
         help="Directory containing optional rsasa/drsasa CSV files.",
     )
+
+    parser.add_argument("--exclude_random_negatives", action="store_true", help="Prevent random negative models from being used in training.")
     parser.add_argument("--edge-features", default=None, help="Comma-separated edge feature names.")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=100)
@@ -997,6 +999,7 @@ def main() -> None:
         edge_feature_transforms=edge_feature_transforms,
         use_esm=args.use_esm, require_pos=args.architecture == "egnn",
         esm_sidecar_dir=args.esm_sidecar_dir,
+        exclude_models=args.exclude_random_negatives
     )
     print("Dataset indexed.")
     first_graph = dataset[0]

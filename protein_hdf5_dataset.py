@@ -37,6 +37,7 @@ OPTIONAL_NODE_FEATURE_SPECS = {
 }
 
 
+
 def default_hdf5_data_path(cluster: bool = False) -> str:
     if cluster:
         return str(CLUSTER_PROCESSED_GRAPH_DATA_DIR)
@@ -258,6 +259,7 @@ class ProteinGraphHDF5Dataset(Dataset):
         use_esm: bool = False,
         require_pos: bool = False,
         esm_sidecar_dir: str | Path | None = None,
+        exclude_models: bool | None = None,
     ) -> None:
         self.paths = _resolve_hdf5_paths(paths)
         self.esm_sidecar_dir = Path(esm_sidecar_dir) if esm_sidecar_dir else None
@@ -274,6 +276,7 @@ class ProteinGraphHDF5Dataset(Dataset):
         self.model_list_dir = Path(model_list_dir) if model_list_dir is not None else None
         self.edge_feature_transforms = dict(edge_feature_transforms or {})
         self.edge_feature_stats = dict(edge_feature_stats or {})
+        self.exclude_models = bool(exclude_models) if exclude_models is not None else False
         unknown_transform_features = sorted(set(self.edge_feature_transforms) - set(self.edge_features))
         if unknown_transform_features:
             raise KeyError(
@@ -331,6 +334,8 @@ class ProteinGraphHDF5Dataset(Dataset):
                             f"examples: {examples}"
                         )
                 for group_name in sorted(h5.keys()):
+                    if self.exclude_models and self._default_exclude_model(group_name):
+                        continue
                     if allowed is not None and group_name not in allowed:
                         continue
                     group = h5[group_name]
@@ -348,6 +353,15 @@ class ProteinGraphHDF5Dataset(Dataset):
                     if max_samples is not None and len(samples) >= max_samples:
                         return samples
         return samples
+
+    def _default_exclude_model(self, model_name: str) -> bool:
+        if model_name.startswith("random"):
+            return True
+        if model_name.startswith("complex") and len(model_name.split("_")) == 2:
+            return True
+        return False
+
+    
 
     def _load_allowed_models(self) -> dict[str, set[str]] | None:
         if self.model_list_dir is None:
