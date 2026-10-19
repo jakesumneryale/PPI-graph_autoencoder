@@ -1,0 +1,61 @@
+# GATE "rank" model: the current default recipe.
+#
+# Exactly the "rank" configuration of the rank follow-up (cluster/train_gate_rank_followup_full.slurm; results in
+# gate_run/rank_followup_full_analysis): test MSE 0.0586, mean within-target Spearman rho 0.686 on the 29 test
+# targets (3 seeds). Anything not set here uses the train_gate.py built-in default (see README).
+#
+#   python train_gate.py --config configs/gate_rank.toml --seed 7 --output-dir runs/rank_seed7
+#
+# Command-line flags override this file, e.g. --capri-head-weight 0.2 or --data /local/graphs.
+
+[data]
+cluster = true                          # cluster default directories for anything not given below
+data = "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs"
+model_list_dir = "/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/gate_run/full_pooling_repaired/model_lists"
+split_manifest = "/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/gate_run/full_pooling_repaired/target_splits.json"
+
+[features]
+node_features = ["aa_type", "chain", "interface_nodes", "interface_node_degree", "rsasa_i_node"]
+edge_features = ["interface_edges", "ca_dist", "voronoi_contact_area", "voronoi_contact_missing", "v_es"]
+edge_recon_features = ["interface_edges", "ca_dist"]       # Voronoi area and v_es are inputs only
+edge_feature_transforms = "voronoi_contact_area=log1p"
+standardize_edge_features = ["voronoi_contact_area", "v_es"] # z-scored with training-split statistics
+edge_stats_seed = 7                                          # same normalization for every seed
+
+[model]
+hidden_dim = 64
+latent_dim = 32
+gat_heads = 4
+dropout = 0.3
+residual_connections = true            # 4 residual GAT layers
+pooling = "combined"                   # whole-graph + interface pooling
+
+[optimization]
+epochs = 20
+batch_size = 16
+lr = 3e-4
+lr_schedule = "cosine"                 # linear warmup, cosine decay to 3% of lr over the 20 epochs
+warmup_steps = 1000
+seed = 7
+targets_per_batch = 4                  # grouped batches: 4 targets x 4 decoys (needed by the ranking loss)
+
+[loss]
+loss_weight_mode = "fixed"
+reconstruction_lambda = 1.0
+dockq_range_weighting = "inverse-sqrt" # DockQ-bin weights (n_max/n_bin)^0.5, capped at 3x, training labels only
+dockq_weight_exponent = 0.5
+rank_loss_weight = 0.1                 # within-target pairwise ranking loss
+rank_temperature = 0.1
+
+[evaluation]
+checkpoint_metric = "target_mse"       # keep the checkpoint with the lowest validation DockQ MSE
+val_every_steps = 2000                 # also validate every 2000 optimizer steps
+validation_only_during_training = true # test set sealed until the end, then scored once
+dockq_range_diagnostics = true         # per-DockQ-range metrics; required by the range weighting
+
+[runtime]
+device = "cuda"
+num_workers = 7                        # 1 main process + 7 loader workers = 8 CPUs
+worker_start_method = "spawn"
+cpu_threads = 1
+output_dir = "runs/gate_rank"

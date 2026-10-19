@@ -37,6 +37,7 @@ from anti_memorization import (
     dann_coefficient,
 )
 from EGNN_model import build_graph_model
+from gate_config import parse_args_with_config, write_run_config
 from evaluate_gate_reconstruction import evaluate_checkpoint, write_csv
 from protein_hdf5_dataset import (
     DEFAULT_EDGE_FEATURES,
@@ -910,7 +911,7 @@ def main() -> None:
         help="DockQ-difference scale of the ranking logistic: predicted gaps of this size count as confident.")
     dockq.add_argument("--targets-per-batch", type=int, default=0,
         help="Build each training batch from this many targets (batch-size / this decoys each); 0 = plain shuffle.")
-    args = parser.parse_args()
+    args = parse_args_with_config(parser)   # --config file.toml: config values, overridden by CLI flags
     if not all(math.isfinite(v) and v >= 0 for v in (args.capri_head_weight, args.rank_loss_weight)):
         parser.error("capri-head-weight and rank-loss-weight must be finite and nonnegative")
     if args.rank_loss_weight and not args.targets_per_batch:
@@ -1040,6 +1041,7 @@ def main() -> None:
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Run configuration written to {write_run_config(args, parser, output_dir)}", flush=True)
     checkpoint_path = output_dir / "gate_model.pt"
     history_path = output_dir / "loss_history.csv"
     test_predictions_path = output_dir / "test_predictions.csv"
