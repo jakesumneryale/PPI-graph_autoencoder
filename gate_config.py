@@ -26,7 +26,7 @@ from pathlib import Path
 # Display order and grouping of options in written configs. Options not listed go under [other].
 SECTIONS: dict[str, tuple[str, ...]] = {
     'data': ('cluster', 'data', 'model_list_dir', 'split_manifest', 'target_name', 'test_fraction', 'val_fraction',
-             'max_samples', 'strict_hdf5', 'optional_node_features_dir'),
+             'max_samples', 'strict_hdf5', 'optional_node_features_dir', 'exclude_random_negatives'),
     'features': ('node_feature_set', 'node_features', 'use_rsasa_i', 'use_drsasa', 'edge_features',
                  'edge_recon_features', 'edge_feature_transforms', 'standardize_edge_features', 'edge_stats_seed',
                  'edge_stats_max_graphs', 'use_esm', 'esm_sidecar_dir', 'esm_projection_dim', 'esm_scale',

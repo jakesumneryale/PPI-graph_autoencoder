@@ -207,7 +207,7 @@ from the built-in default** (generated from `--print-config` with and without th
 | optimization | `weight_decay = 1e-5`, `warmup_steps = 1000`, `lr_final_fraction = 0.03`, `grad_clip = 1.0`, `seed = 7` (runs use 7, 17, 27), `decoys_per_target = 0`, `ema_decay = 0` |
 | loss | `loss_weight_mode = fixed`, `target_weight = 1.0`, `node_weight = 1.0`, `edge_attr_weight = 1.0`, `edge_presence_weight = 0.1`, `reconstruction_lambda = 1.0`, `dockq_weight_exponent = 0.5`, `dockq_weight_cap = 3.0`, `rank_temperature = 0.1`, `dockq_hinge_start = 0.23` (also the ranking-loss pair threshold), `capri_head_weight = 0`, `target_adversary_weight = 0` |
 | augmentation | `edge_dropout = 0`, `node_feature_mask = 0`, `ca_dist_noise = 0` |
-| data | `target_name = DockQ`, `test_fraction = 0.2`, `val_fraction = 0.1` (both ignored when `split_manifest` is given) |
+| data | `target_name = DockQ`, `test_fraction = 0.2`, `val_fraction = 0.1` (both ignored when `split_manifest` is given), `exclude_random_negatives = false` (true drops the random-negative models) |
 | features | `use_rsasa_i = false`, `use_drsasa = false`, `use_esm = false`, `edge_stats_max_graphs = 200` |
 
 The shares options (`target_share`, `node_share`, …) only matter with `loss_weight_mode = shares`, which the old
