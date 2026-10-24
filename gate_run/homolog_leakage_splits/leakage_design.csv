@@ -1,0 +1,6 @@
+fold,train_targets,n_dropped,n_linked_test,n_test,no_homologs_dropped,matched_control_dropped,linked_test
+0,250,5,2,60,"1ppf,2b5r,2z7f,3uou,9ass","1brc,4f8c,5ifr,6zh1,8svi","1fle,2g2u"
+1,244,10,8,61,"1brb,1brc,1k9o,3m7q,4ayi,5c67,6gfi,6zh1,7jr2,7qe9","2b5u,2wo3,3hei,3k9o,3pb1,4f8c,6lyj,6w0v,8i5v,8svi","1acb,1avx,1cgi,1d6r,1oph,1ppe,2uuy,4k12"
+2,241,13,9,61,"1emv,2b5u,3k9o,3pb1,4f8c,4fbj,5ifr,5kyc,6fx4,6rya,6w0v,7myh,8svi","1brb,1k9o,2b5r,2dzn,2iy1,2nqd,2wo3,3m7q,3uou,5ays,6gum,7jr2,9ass","1oc0,1wrd,2ayo,2bkr,2hth,2oob,3k9p,7cei,7jxv"
+3,244,10,11,61,"1ppf,2iy1,2wo3,3hei,4crw,4ip3,4w5v,5ays,5ojw,6gum","1brb,2b5u,2dzn,2z7f,6lyj,6zh1,7jr2,8b2r,8svi,9ass","1j7d,1r0r,1udi,2grn,2hle,2pe6,3rcz,3sgb,3sgq,4ct6,4dhi"
+4,243,10,9,62,"2dzn,2nqd,3cbj,5ays,6gho,6kbr,6lyj,7jr2,8b2r,8i5v","2b5r,2b5u,3hei,3m7q,4f8c,4fbj,4w5v,5c67,6rya,7qe9","1e96,2dvw,2fju,2nz8,2oul,3gfk,3wdg,6fud,7joe"

@@ -35,6 +35,11 @@ apbs_analysis/approach_movie.py
 !/gate_run/**/*.sh
 !/gate_run/**/*.slurm
 !/gate_run/**/*.md
+# Split manifests that cluster runs read (inputs, not results); outputs written next to them stay ignored
+!/gate_run/expanded_target_splits/*
+!/gate_run/homolog_leakage_splits/*
+!/gate_run/dataset_size_comparison/*.json
+!/gate_run/dataset_size_comparison/*.txt
 gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_dockq_rmse.pdf
 gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_dockq_spearman.pdf
 gate_run/full_feature_ablation_lr5e-6/analysis_figures/ablation_incremental_changes.pdf

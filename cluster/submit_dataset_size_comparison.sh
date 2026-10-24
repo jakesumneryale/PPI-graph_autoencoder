@@ -66,12 +66,14 @@ train)
   conda activate py311_env
   source "$PROJECT_DIR/venv/bin/activate"
   python train_gate.py --config "$CONFIG" --print-config > /dev/null
-  # The manifests were written with an assumed cluster path; point them at the data directories made below.
+  # The committed manifests carry an assumed cluster path; staged/ gets copies pointing at the data directories
+  # made below (staged/ is git-ignored, so the tracked manifests stay unmodified).
+  mkdir -p "$EXP/staged"
   for arm in "${ARMS[@]}"; do
-    python - "$EXP/target_splits_$arm.json" "$EXP/data_$arm" <<'PY'
+    python - "$EXP/target_splits_$arm.json" "$EXP/data_$arm" "$EXP/staged/target_splits_$arm.json" <<'PY'
 import json, sys
-path, data = sys.argv[1], sys.argv[2]
-m = json.load(open(path))
+src, data, path = sys.argv[1:4]
+m = json.load(open(src))
 m['data_path'] = data
 for split in m['splits'].values():
     split['paths'] = [f'{data}/{t}.hdf5' for t in split['targets']]
@@ -96,7 +98,7 @@ PY
     args=(--parsable --export=ALL --array=1-3 --time=6-23:00:00 --job-name="gate_size_$arm"
           --output="$out/logs/train_%A_%a.out" --error="$out/logs/train_%A_%a.err")
     targs=("$CONFIG" "$out" --data "$data" --model-list-dir "$EXP/model_lists"
-           --split-manifest "$EXP/target_splits_$arm.json" --val-every-steps "${VAL_EVERY[$arm]}")
+           --split-manifest "$EXP/staged/target_splits_$arm.json" --val-every-steps "${VAL_EVERY[$arm]}")
     if [[ -n ${DRY_RUN:-} ]]; then echo "sbatch ${args[*]} cluster/train_gate_config.slurm ${targs[*]}"; continue; fi
     mkdir -p "$out/logs"
     echo "$arm: $(sbatch "${args[@]}" cluster/train_gate_config.slurm "${targs[@]}") -> $out/gate_rank_seed{7,17,27}"
