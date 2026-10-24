@@ -25,7 +25,7 @@ import numpy as np
 from voronoi_edge_features.common import checkpoint_model_is_complete
 
 
-DEFAULT_DATA_DIR = Path("/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs")
+DEFAULT_DATA_DIR = Path("/home/jas485/project_pi_co54/jas485/ppi_processed_graphs")
 DEFAULT_CHECKPOINT_DIR = Path("voronoi_edge_features_data/contact_area_hdf5")
 DEFAULT_OUTPUT_DIR = Path("voronoi_dataset_audit")
 UNIFORM_PATTERN = re.compile(

@@ -3,12 +3,12 @@
 # then submits one GPU array task per run. Reuses the parent cohort, model lists and ESM
 # sidecars; nothing is re-audited and no source data is touched.
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 export FULL_PARENT_DIR="${FULL_PARENT_DIR:-$PROJECT_DIR/gate_run/full_pooling_validation}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/full_esm_tuning}"
 export ESM_SIDECARS="${ESM_SIDECARS:-$PROJECT_DIR/full_pooling_esm_sidecars}"
-export DATA_DIR="${DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
-export RSASA_DIR="${RSASA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data}"
+export DATA_DIR="${DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+export RSASA_DIR="${RSASA_DIR:-/nfs/roberts/project/pi_co54/jas485/rsasa_i_graph_data}"
 # Point SPLIT_MANIFEST at the stratified-difficulty manifest once it exists. It must cover
 # the same targets that have ESM sidecars; the builder checks this and refuses otherwise.
 export SPLIT_MANIFEST="${SPLIT_MANIFEST:-$FULL_PARENT_DIR/target_splits.json}"

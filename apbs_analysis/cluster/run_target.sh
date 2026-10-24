@@ -9,7 +9,7 @@
 # point: finished models are skipped.
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 PDB_BASE_DIR="${PDB_BASE_DIR:-/gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data}"
 ENV_PREFIX="${APBS_ENV_PREFIX:-$PROJECT_DIR/apbs_env}"

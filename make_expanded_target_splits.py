@@ -122,7 +122,7 @@ def stratified_partition(targets: pd.DataFrame, n: int, rng: random.Random) -> l
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--data-dir', default='/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs')
+    parser.add_argument('--data-dir', default='/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs')
     parser.add_argument('--out', type=Path, default=Path(__file__).resolve().parent / 'gate_run' / 'expanded_target_splits')
     parser.add_argument('--val-fraction', type=float, default=0.1)
     parser.add_argument('--seed', type=int, default=5)

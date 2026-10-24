@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
-CLUSTER_EXPERIMENT = '/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/gate_run/dataset_size_comparison'
+CLUSTER_EXPERIMENT = '/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/gate_run/dataset_size_comparison'
 
 
 def main() -> None:

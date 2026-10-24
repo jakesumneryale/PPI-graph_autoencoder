@@ -4,8 +4,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=10G
 #SBATCH --time=06:00:00
-#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.out
-#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.err
+#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.out
+#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.err
 
 # Builds one shared 10% stratified subset of the full graph dataset, used by
 # every ablation job in the triaged sweep (cluster/submit_ablation_sweep.sh).
@@ -30,8 +30,8 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
-DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}}"
 TARGETS_FILE="${TARGETS_FILE:-$PROJECT_DIR/cluster/targets.txt}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/gate_run/subset_10pct_hdf5}"
 MODEL_LIST_DIR="${MODEL_LIST_DIR:-$PROJECT_DIR/voronoi_dataset_audit/successful_models}"

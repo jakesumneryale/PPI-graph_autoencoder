@@ -17,7 +17,7 @@
 # dependency at runtime.
 set -euo pipefail
 
-PROJECT_DIR="/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder"
+PROJECT_DIR="/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder"
 VENV_DIR="$PROJECT_DIR/venv"
 
 module load miniconda

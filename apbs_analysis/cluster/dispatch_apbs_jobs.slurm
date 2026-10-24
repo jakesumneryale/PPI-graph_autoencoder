@@ -7,8 +7,8 @@
 #SBATCH --time=12:00:00
 #SBATCH --requeue
 #SBATCH --signal=B:TERM@120
-#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.out
-#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.err
+#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.out
+#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.err
 #
 # 146 targets, one per array task, same layout as the Voronoi array.
 #
@@ -53,4 +53,4 @@
 # apbs_analysis/cluster/resubmit_failed.sh.
 
 set -euo pipefail
-bash /gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/apbs_analysis/cluster/run_target.sh
+bash /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/apbs_analysis/cluster/run_target.sh

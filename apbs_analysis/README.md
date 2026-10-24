@@ -139,7 +139,7 @@ writes new environments, so keep the default first.
 ```yaml
 envs_dirs:
   - /home/jas485/.conda/envs
-  - /gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder
+  - /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder
 ```
 
 `setup_env.sh` detects whether the name already resolves and prints this block

@@ -13,8 +13,9 @@
 #   DRY_RUN=1 bash cluster/submit_dataset_size_comparison.sh train
 set -euo pipefail
 STAGE=${1:?usage: submit_dataset_size_comparison.sh audit|train}
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
-OLD_GRAPH_DIR="${OLD_GRAPH_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
+# The repository this script is in (exported, so the Slurm jobs use it too); the original graphs sit next to it.
+export PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
+OLD_GRAPH_DIR="${OLD_GRAPH_DIR:-$(dirname "$PROJECT_DIR")/ppi_processed_graphs}"
 NEW_GRAPH_DIR="${NEW_GRAPH_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_expansion_graphs}"
 OLD_MODEL_LISTS="${OLD_MODEL_LISTS:-$PROJECT_DIR/gate_run/full_pooling_repaired/model_lists}"
 EXP="$PROJECT_DIR/gate_run/dataset_size_comparison"
@@ -38,7 +39,7 @@ audit)
   done
   (( ${#missing[@]} == 0 )) || { echo "Missing batch-1 graph files in $check_dir: ${missing[*]}" >&2; exit 2; }
   n=$(grep -c . "$tasks")
-  args=(--parsable --array="1-$n" --output="$EXP/logs/audit_%A_%a.out" --error="$EXP/logs/audit_%A_%a.err")
+  args=(--parsable --export=ALL --array="1-$n" --output="$EXP/logs/audit_%A_%a.out" --error="$EXP/logs/audit_%A_%a.err")
   [[ -n ${DEPEND:-} ]] && args+=(--dependency="afterok:$DEPEND" --kill-on-invalid-dep=yes)
   if [[ -n ${DRY_RUN:-} ]]; then echo "sbatch ${args[*]} cluster/audit_expansion_graphs.slurm $tasks $EXP"; exit 0; fi
   echo "Submitted audit of $n batch-1 graphs: $(sbatch "${args[@]}" cluster/audit_expansion_graphs.slurm "$tasks" "$EXP")"
@@ -65,6 +66,18 @@ train)
   conda activate py311_env
   source "$PROJECT_DIR/venv/bin/activate"
   python train_gate.py --config "$CONFIG" --print-config > /dev/null
+  # The manifests were written with an assumed cluster path; point them at the data directories made below.
+  for arm in "${ARMS[@]}"; do
+    python - "$EXP/target_splits_$arm.json" "$EXP/data_$arm" <<'PY'
+import json, sys
+path, data = sys.argv[1], sys.argv[2]
+m = json.load(open(path))
+m['data_path'] = data
+for split in m['splits'].values():
+    split['paths'] = [f'{data}/{t}.hdf5' for t in split['targets']]
+open(path, 'w').write(json.dumps(m, indent=2) + '\n')
+PY
+  done
 
   # ~1,300 models per original target and ~2,000 per batch-1 target, so the expanded arm has ~3x the training
   # graphs per epoch. Validating every 2,000 steps would then validate the 35-target set ~14x per epoch; scaling
@@ -80,7 +93,7 @@ train)
     done < "$EXP/targets_$arm.txt"
     extra=$(comm -13 <(sort "$EXP/targets_$arm.txt") <(ls "$data" | sed 's/\.hdf5$//' | sort))
     [[ -z $extra ]] || { echo "$data has files outside the manifest: $extra" >&2; exit 2; }
-    args=(--parsable --array=1-3 --time=6-23:00:00 --job-name="gate_size_$arm"
+    args=(--parsable --export=ALL --array=1-3 --time=6-23:00:00 --job-name="gate_size_$arm"
           --output="$out/logs/train_%A_%a.out" --error="$out/logs/train_%A_%a.err")
     targs=("$CONFIG" "$out" --data "$data" --model-list-dir "$EXP/model_lists"
            --split-manifest "$EXP/target_splits_$arm.json" --val-every-steps "${VAL_EVERY[$arm]}")

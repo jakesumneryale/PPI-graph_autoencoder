@@ -5,8 +5,8 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=10G
 #SBATCH --time=12:00:00
-#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
-#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
+#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
+#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
 
 # Commit voronoi_contact_missing into the graph HDF5 files, one target per task.
 #
@@ -21,8 +21,8 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
-GRAPH_DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+GRAPH_DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}}"
 RUN_DIR="$PROJECT_DIR/voronoi_run"
 TARGETS_FILE="$PROJECT_DIR/cluster/targets.txt"
 MASK_MARKER_DIR="$RUN_DIR/committed_mask"

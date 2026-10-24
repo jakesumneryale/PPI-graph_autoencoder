@@ -11,7 +11,7 @@
 # the code, and so it can be deleted with the project.
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 ENV_PREFIX="${APBS_ENV_PREFIX:-$PROJECT_DIR/apbs_env}"
 
 module load miniconda

@@ -7,9 +7,9 @@ bash cluster/submit_full_pooling_validation.sh
 ```
 
 Default graph directory:
-`/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs`.
+`/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs`.
 Default rSASA directory:
-`/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data`.
+`/nfs/roberts/project/pi_co54/jas485/rsasa_i_graph_data`.
 Override with `DATA_DIR` and `RSASA_DIR` if needed. This launcher deliberately
 does not use `extension_data_10pct_*`, a subset HDF5 directory, old subset model
 lists, or the old launcher's "full" mode (which meant more seeds on 10% data).

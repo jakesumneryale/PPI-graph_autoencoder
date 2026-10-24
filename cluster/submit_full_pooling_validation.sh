@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Full graphs, not the old "full" seed mode of the 10% experiment launcher.
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
-export DATA_DIR="${DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
-export RSASA_DIR="${RSASA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data}"
+export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export DATA_DIR="${DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+export RSASA_DIR="${RSASA_DIR:-/nfs/roberts/project/pi_co54/jas485/rsasa_i_graph_data}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/full_pooling_validation}"
 export AUDIT_DIR="${AUDIT_DIR:-$PROJECT_DIR/full_pooling_audit}"
 export PRIOR_SPLIT="${PRIOR_SPLIT:-$PROJECT_DIR/gate_run/model_extensions_10pct_quick_no_apbs/target_splits.json}"

@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=10G
 #SBATCH --time=6-23:00:00
-#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
-#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
+#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
+#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
 
 # Loss-reweighting sweep: the same six feature/architecture cells as
 # train_gate_full_feature_ablation.slurm, but with the DockQ term promoted to
@@ -31,8 +31,8 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
-DATA_DIR="${DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+DATA_DIR="${DATA_DIR:-/home/jas485/project_pi_co54/jas485/ppi_processed_graphs}"
 MODEL_LIST_DIR="${MODEL_LIST_DIR:-$PROJECT_DIR/voronoi_dataset_audit/successful_models}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$PROJECT_DIR/gate_run/loss_reweight_lr5e-6}"
 

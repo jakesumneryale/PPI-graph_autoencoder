@@ -48,15 +48,15 @@ that with --optional-node-features-dir.
 
 If you are running on the cluster, add --cluster and run the code from:
 
-/gpfs/boyd/pi/pi_co54/jas485/ppi_autoencoder_project
+/home/jas485/project_pi_co54/jas485/ppi_autoencoder_project
 
 That flag switches the default graph-data directory to:
 
-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs
+/home/jas485/project_pi_co54/jas485/ppi_processed_graphs
 
 and the default optional rSASA/drSASA directory to:
 
-/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data
+/home/jas485/project_pi_co54/jas485/rsasa_i_graph_data
 
 For the NVIDIA L40S nodes, a good starting point is one GPU with
 --num-workers 8 so the dataloader uses 8 CPU cores on the 32-core / 4-GPU
@@ -146,7 +146,7 @@ After the cluster Voronoi jobs finish, submit the read-only audit/subset job:
 sbatch cluster/audit_voronoi_dataset.slurm
 
 It scans every target HDF5 in
-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs. A model is usable
+/home/jas485/project_pi_co54/jas485/ppi_processed_graphs. A model is usable
 only when edge_features/voronoi_contact_area is numeric, finite, and has
 exactly one value per edge_features/contacts row. Existing checkpoint groups
 are also cross-checked and any mismatch is recorded.

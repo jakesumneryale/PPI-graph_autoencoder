@@ -190,7 +190,7 @@ from the built-in default** (generated from `--print-config` with and without th
 | `dockq_range_diagnostics` | false | **true** | per-DockQ-range metrics; required by the range weighting |
 | **Data and runtime** (site-specific, change freely) | | | |
 | `cluster` | false | **true** | cluster default directories |
-| `data` | (local default) | **`/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs`** | |
+| `data` | (local default) | **`/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs`** | |
 | `model_list_dir` | (all models) | **`gate_run/full_pooling_repaired/model_lists`** | the usable models of each target |
 | `split_manifest` | (new random split) | **`gate_run/full_pooling_repaired/target_splits.json`** | the fixed train/val/test target split |
 | `device` | `auto` | **`cuda`** | |

@@ -11,7 +11,7 @@
 set -euo pipefail
 TASKS=${1:?usage: sbatch audit_expansion_graphs.slurm <task file> <output dir>}
 OUT=${2:?usage: sbatch audit_expansion_graphs.slurm <task file> <output dir>}
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 GRAPH=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$TASKS")
 [[ -n $GRAPH ]] || { echo "no task on line $SLURM_ARRAY_TASK_ID of $TASKS" >&2; exit 2; }
 

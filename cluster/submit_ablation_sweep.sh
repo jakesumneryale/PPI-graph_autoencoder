@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 cd "$PROJECT_DIR"
 
 SUBSET_JOB_ID=$(sbatch --parsable cluster/build_10pct_subset.slurm)

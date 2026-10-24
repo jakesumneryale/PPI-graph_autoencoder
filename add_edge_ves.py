@@ -37,7 +37,7 @@ FEATURE_NAME = "v_es"
 TEMPORARY_NAME = f"__in_progress__{FEATURE_NAME}"
 VALUE_COLUMN = "Edge_Ves"
 
-CLUSTER_VES_DIR = Path("/gpfs/boyd/pi/pi_co54/jas485/ppi_decoy_interface_edge_charge")
+CLUSTER_VES_DIR = Path("/home/jas485/project_pi_co54/jas485/ppi_decoy_interface_edge_charge")
 
 
 def default_ves_dir(cluster: bool) -> Path | None:

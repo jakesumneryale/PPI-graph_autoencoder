@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=10G
 #SBATCH --time=24:00:00
-#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
-#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
+#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
+#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
 
 # Twelve controlled runs:
 #   tasks 1-6:  original two-layer GAT encoder
@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 DATA_DIR="${DATA_DIR:-$PROJECT_DIR/voronoi_dataset_audit/subset_hdf5}"
 ABLATION_DIR="${ABLATION_DIR:-$PROJECT_DIR/gate_run/node_feature_ablation_lr5e-6}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-$PROJECT_DIR/gate_run/voronoi_10pct_50epochs/target_splits.json}"

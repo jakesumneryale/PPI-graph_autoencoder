@@ -9,7 +9,7 @@
 #   CHAIN=0                   submit only the resume array
 set -euo pipefail
 ORIGINAL_JOB="${1:-none}"
-export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 TARGETS="${TARGETS:-1c3a 1ggp 1itb 1kfu 1pdk 1spp 1tfo 2d5r 2dvw 2hla 2hsm 2hth 2oul 2pe6 2wmp 3gfk 3k9p 3ona 3qc8}"
 TIME_LIMIT="${TIME_LIMIT:-2-00:00:00}"
 CHAIN="${CHAIN:-1}"
@@ -33,7 +33,7 @@ printf 'Voronoi resume: %s (waiting on: %s; array %s; limit %s)\n' "$RESUME" "$O
 
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/full_pooling_repaired}"
 export AUDIT_DIR="${AUDIT_DIR:-$PROJECT_DIR/gate_run/full_pooling_audit_repaired}"
-export RSASA_DIR="${RSASA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data}"
+export RSASA_DIR="${RSASA_DIR:-/nfs/roberts/project/pi_co54/jas485/rsasa_i_graph_data}"
 export PRIOR_SPLIT="${PRIOR_SPLIT:-$PROJECT_DIR/target_splits.json}"
 export SOURCE_MATRIX="${SOURCE_MATRIX:-$PROJECT_DIR/gate_run/dockq_followup_sweep/matrix.json}"
 export MIN_ELIGIBLE_MODELS="${MIN_ELIGIBLE_MODELS:-165000}"

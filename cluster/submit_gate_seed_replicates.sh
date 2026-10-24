@@ -18,9 +18,9 @@
 #   SKIP_MASK=1   assume the mask is already committed and skip stage 1
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
 export PROJECT_DIR
-export DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}}"
+export DATA_DIR="${DATA_DIR:-${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}}"
 cd "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR/voronoi_run/logs"
 

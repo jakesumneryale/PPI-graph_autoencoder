@@ -21,9 +21,9 @@ DEFAULT_NODE_FEATURES = ("aa_type", "chain", "interface_nodes")
 DEFAULT_EDGE_FEATURES = ("interface_edges", "ca_dist")
 DEFAULT_PROCESSED_GRAPH_DATA_DIR = Path("/scratch/ppi_autoencoder_code/processed_graph_data")
 DEFAULT_OPTIONAL_NODE_FEATURES_DIR = Path("/scratch/ppi_autoencoder_code/rsasa_i_data")
-CLUSTER_PROJECT_ROOT = Path("/gpfs/boyd/pi/pi_co54/jas485/ppi_autoencoder_project")
-CLUSTER_PROCESSED_GRAPH_DATA_DIR = Path("/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs")
-CLUSTER_OPTIONAL_NODE_FEATURES_DIR = Path("/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data")
+CLUSTER_PROJECT_ROOT = Path("/home/jas485/project_pi_co54/jas485/ppi_autoencoder_project")
+CLUSTER_PROCESSED_GRAPH_DATA_DIR = Path("/home/jas485/project_pi_co54/jas485/ppi_processed_graphs")
+CLUSTER_OPTIONAL_NODE_FEATURES_DIR = Path("/home/jas485/project_pi_co54/jas485/rsasa_i_graph_data")
 DATA_PATH_ENV_VAR = "PPI_HDF5_DATA"
 OPTIONAL_NODE_FEATURE_SPECS = {
     "rsasa_i": {

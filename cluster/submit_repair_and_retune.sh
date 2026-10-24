@@ -4,9 +4,9 @@
 # previous one to succeed, so a failed repair or audit stops the pipeline before any GPU
 # time is spent.
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
-export DATA_DIR="${DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
-export RSASA_DIR="${RSASA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data}"
+export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export DATA_DIR="${DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+export RSASA_DIR="${RSASA_DIR:-/nfs/roberts/project/pi_co54/jas485/rsasa_i_graph_data}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/full_pooling_repaired}"
 export AUDIT_DIR="${AUDIT_DIR:-$PROJECT_DIR/gate_run/full_pooling_audit_repaired}"
 export REPAIR_REPORTS="${REPAIR_REPORTS:-$PROJECT_DIR/gate_run/interface_degree_repair}"
