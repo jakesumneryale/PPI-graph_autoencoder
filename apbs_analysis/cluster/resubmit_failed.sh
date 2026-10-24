@@ -4,8 +4,8 @@
 # skipped automatically by the worker, so this never redoes completed work.
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
-PDB_BASE_DIR="${PDB_BASE_DIR:-/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PDB_BASE_DIR="${PDB_BASE_DIR:-/gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data}"
 RUN_DIR="$PROJECT_DIR/apbs_run"
 TARGETS_FILE="$PROJECT_DIR/apbs_analysis/cluster/targets.txt"
 DONE_MARKER_DIR="$RUN_DIR/completed"

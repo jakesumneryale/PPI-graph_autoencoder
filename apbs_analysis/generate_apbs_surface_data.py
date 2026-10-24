@@ -5,8 +5,8 @@ workers. Output goes to <output-dir>/<target>_apbs_surface.hdf5 plus a summary
 CSV; the training graph HDF5 files are never opened or modified.
 
     python -m apbs_analysis.generate_apbs_surface_data 1acb \
-        --pdb-root /nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data \
-        --output-dir /nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data
+        --pdb-root /gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data \
+        --output-dir /gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data
 """
 
 from __future__ import annotations

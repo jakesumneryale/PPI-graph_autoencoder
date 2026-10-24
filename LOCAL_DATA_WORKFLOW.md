@@ -17,7 +17,7 @@ The downloader compares each reusable file's SHA-256 against the cluster manifes
 Sync the new scripts to the cluster repository, then run there:
 
 ```bash
-cd /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder
+cd /gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder
 sbatch cluster/bundle_local_extension_data.slurm
 ```
 
@@ -98,7 +98,7 @@ globus task wait TASK_ID --timeout 60
 To download the optional smoke bundle, use a separate destination:
 
 ```bash
-SOURCE_BUNDLE=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/local_transfer_smoke \
+SOURCE_BUNDLE=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/local_transfer_smoke \
 LOCAL_ROOT=/scratch/ppi_extension_data/smoke \
 bash scripts/download_extension_data.sh
 ```

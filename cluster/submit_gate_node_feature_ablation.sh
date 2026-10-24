@@ -3,7 +3,7 @@
 # if every HDF5 model was updated or already contained a valid feature.
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 cd "$PROJECT_DIR"
 
 PREPROCESS_JOB_ID=$(sbatch --parsable cluster/add_interface_node_degree.slurm)

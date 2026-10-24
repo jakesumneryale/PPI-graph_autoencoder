@@ -11,8 +11,8 @@ import re
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Cluster store the array jobs write into (one HDF5 + one summary CSV per target).
-CLUSTER_OUTPUT_DIR = Path("/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data")
-CLUSTER_PDB_BASE_DIR = Path("/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data")
+CLUSTER_OUTPUT_DIR = Path("/gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data")
+CLUSTER_PDB_BASE_DIR = Path("/gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data")
 # Local proof-of-concept store for the 84 bound complexes.
 LOCAL_OUTPUT_DIR = Path.home() / "Documents" / "apbs_electrostatics_84_targets"
 

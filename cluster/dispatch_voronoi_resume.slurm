@@ -6,8 +6,8 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --requeue
 #SBATCH --signal=B:TERM@180
-#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
-#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
+#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
+#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
 #
 # Continuation of dispatch_voronoi_jobs.slurm with a longer limit. run_target.sh already
 # skips every model whose checkpoint group is complete (only missing models are computed) and
@@ -15,7 +15,7 @@
 # through cluster/submit_voronoi_resume.sh, which holds it until the first array has ended so two
 # jobs never write the same checkpoint HDF5.
 set -uo pipefail
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 
 # Slurm's B: signal reaches only this shell. Forward it to the running Python so it stops after
 # the current model and flushes, rather than being killed mid-write at the time limit.

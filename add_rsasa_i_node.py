@@ -33,7 +33,7 @@ TEMPORARY_NAME = f"__in_progress__{FEATURE_NAME}"
 VALUE_COLUMN = "rSASA_i_complex"
 CHAIN_COLUMN = "chain_id"
 
-CLUSTER_RSASA_DIR = Path("/nfs/roberts/pi/pi_co54/nb685/scratch_backup/rSASA")
+CLUSTER_RSASA_DIR = Path("/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/rSASA")
 
 
 def default_rsasa_dir(cluster: bool) -> Path | None:

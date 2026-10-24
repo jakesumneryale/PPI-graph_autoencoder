@@ -7,8 +7,8 @@
 #SBATCH --time=16:00:00
 #SBATCH --requeue
 #SBATCH --signal=B:TERM@120
-#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
-#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
+#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.out
+#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%A_%a.err
 #
 # 146 targets, one per array task. A measured 304-residue 1acb model peaked at
 # 10.21 GiB RSS. Linear scaling to the 1,500-residue theoretical maximum is
@@ -34,4 +34,4 @@
 # resubmitting this whole array.
 
 set -euo pipefail
-bash /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/cluster/run_target.sh
+bash /gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/cluster/run_target.sh

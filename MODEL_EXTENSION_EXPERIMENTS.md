@@ -149,8 +149,8 @@ On the cluster, from the repository:
 
 ```bash
 # Override defaults here if your stores are elsewhere.
-export APBS_DIR=/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data
-export ESM_ROOT=/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds
+export APBS_DIR=/gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data
+export ESM_ROOT=/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/SS_embeds
 # Optional: preserve an existing target split.
 export PRIOR_SPLIT="$PWD/gate_run/voronoi_10pct_50epochs/target_splits.json"
 

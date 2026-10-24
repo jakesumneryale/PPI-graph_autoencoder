@@ -105,14 +105,14 @@ just needs the same command again.
 ```bash
 bash apbs_analysis/cluster/setup_env.sh          # once, see "Naming the environment" below
 python apbs_analysis/cluster/list_targets.py \
-    /nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data \
+    /gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data \
     apbs_analysis/cluster/targets.txt            # only if the target set changed
 sbatch --array=1 apbs_analysis/cluster/dispatch_apbs_jobs.slurm   # validate on one target
 sbatch apbs_analysis/cluster/dispatch_apbs_jobs.slurm             # full array
 ```
 
 Results land in
-`/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data/` as
+`/gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data/` as
 `<target>_apbs_surface.hdf5` + `<target>_apbs_summary.csv`.
 
 The worker mirrors the Voronoi array's operational contract — one target per
@@ -139,7 +139,7 @@ writes new environments, so keep the default first.
 ```yaml
 envs_dirs:
   - /home/jas485/.conda/envs
-  - /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder
+  - /gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder
 ```
 
 `setup_env.sh` detects whether the name already resolves and prints this block

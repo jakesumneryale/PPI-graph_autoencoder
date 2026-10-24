@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reuse the completed APBS-free data and split. Submit only four new hypotheses.
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/generalization_diagnostics_seed7}"
 SOURCE_MATRIX="${SOURCE_MATRIX:-$PROJECT_DIR/gate_run/model_extensions_10pct_quick_no_apbs/matrix.json}"
 cd "$PROJECT_DIR"

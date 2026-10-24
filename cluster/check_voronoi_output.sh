@@ -4,8 +4,8 @@
 # Example: bash cluster/check_voronoi_output.sh 1acb complex.0_0_11
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
-GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
 FEATURE_NAME="${FEATURE_NAME:-voronoi_contact_area}"
 TARGET_NAME="${1:-}"
 MODEL_NAME="${2:-}"

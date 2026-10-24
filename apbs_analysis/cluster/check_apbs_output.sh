@@ -3,9 +3,9 @@
 # Usage: bash apbs_analysis/cluster/check_apbs_output.sh TARGET [MODEL_GROUP]
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
-PDB_BASE_DIR="${PDB_BASE_DIR:-/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data}"
-OUTPUT_DIR="${OUTPUT_DIR:-/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+PDB_BASE_DIR="${PDB_BASE_DIR:-/gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data}"
+OUTPUT_DIR="${OUTPUT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data}"
 ENV_PREFIX="${APBS_ENV_PREFIX:-$PROJECT_DIR/apbs_env}"
 TARGET_NAME="${1:-}"
 MODEL_NAME="${2:-}"

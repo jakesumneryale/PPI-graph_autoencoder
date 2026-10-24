@@ -7,8 +7,8 @@
 #SBATCH --time=12:00:00
 #SBATCH --requeue
 #SBATCH --signal=B:TERM@120
-#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.out
-#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.err
+#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.out
+#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/apbs_run/logs/%x_%A_%a.err
 #
 # 146 targets, one per array task, same layout as the Voronoi array.
 #
@@ -47,10 +47,10 @@
 # launching the full array.
 #
 # Results are written to
-#   /nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data/
+#   /gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data/
 # as <target>_apbs_surface.hdf5 plus <target>_apbs_summary.csv. The training
 # graph HDF5 files are never opened. To resubmit only incomplete targets, use
 # apbs_analysis/cluster/resubmit_failed.sh.
 
 set -euo pipefail
-bash /nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/apbs_analysis/cluster/run_target.sh
+bash /gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/apbs_analysis/cluster/run_target.sh

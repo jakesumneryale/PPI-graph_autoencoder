@@ -4,7 +4,7 @@
 #   bash cluster/submit_cause_ablation_full.sh
 # Set OUTPUT_ROOT to use a fresh experiment directory; existing ones are refused.
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 export OUTPUT_ROOT="${OUTPUT_ROOT:-$PROJECT_DIR/gate_run/cause_ablation_full}"
 cd "$PROJECT_DIR"
 

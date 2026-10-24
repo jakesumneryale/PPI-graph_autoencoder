@@ -24,7 +24,7 @@ bash cluster/submit_full_esm_validation.sh
 
 If the parent experiment has a custom location, set `FULL_PARENT_DIR`.
 `EXPERIMENT_DIR`, `ESM_ROOT`, and `ESM_SIDECARS` may also be overridden. The default
-embedding root is `/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds`.
+embedding root is `/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/SS_embeds`.
 
 The launcher submits one serial preparation task per target, then a serial
 cohort validation job, then six GPU tasks. Dependencies block training if any

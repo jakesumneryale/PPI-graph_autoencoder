@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/dockq_followup_sweep}"
 SOURCE_MATRIX="${SOURCE_MATRIX:-$PROJECT_DIR/gate_run/dockq_priority_sweep/matrix.json}"
 PREFLIGHT_MATRIX="${PREFLIGHT_MATRIX:-$PROJECT_DIR/gate_run/model_extensions_10pct_quick_no_apbs/matrix.json}"

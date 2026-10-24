@@ -10,9 +10,9 @@
 
 [data]
 cluster = true                          # cluster default directories for anything not given below
-data = "/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs"
-model_list_dir = "/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/gate_run/full_pooling_repaired/model_lists"
-split_manifest = "/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/gate_run/full_pooling_repaired/target_splits.json"
+data = "/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs"
+model_list_dir = "/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/gate_run/full_pooling_repaired/model_lists"
+split_manifest = "/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/gate_run/full_pooling_repaired/target_splits.json"
 
 [features]
 node_features = ["aa_type", "chain", "interface_nodes", "interface_node_degree", "rsasa_i_node"]

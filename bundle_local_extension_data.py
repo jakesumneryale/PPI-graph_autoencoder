@@ -176,7 +176,7 @@ def build_bundle(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    project = Path('/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder')
+    project = Path('/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder')
     parser.add_argument('--mode', choices=('smoke', 'full'), default='full')
     parser.add_argument('--targets', nargs='+')
     parser.add_argument('--missing-apbs', choices=('error', 'exclude'), default='error',
@@ -184,11 +184,11 @@ def main():
     parser.add_argument('--preflight-only', action='store_true', help='Write APBS coverage audit without copying data')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--subset', type=Path, default=project / 'voronoi_dataset_audit/subset_hdf5')
-    parser.add_argument('--feature-data', type=Path, default=Path('/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs'))
-    parser.add_argument('--apbs-dir', type=Path, default=Path('/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data'))
-    parser.add_argument('--esm-root', type=Path, default=Path('/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds'))
-    parser.add_argument('--pdb-root', type=Path, default=Path('/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data'))
-    parser.add_argument('--optional-dir', type=Path, default=Path('/home/jas485/project_pi_co54/jas485/rsasa_i_graph_data'))
+    parser.add_argument('--feature-data', type=Path, default=Path('/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs'))
+    parser.add_argument('--apbs-dir', type=Path, default=Path('/gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data'))
+    parser.add_argument('--esm-root', type=Path, default=Path('/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/SS_embeds'))
+    parser.add_argument('--pdb-root', type=Path, default=Path('/gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data'))
+    parser.add_argument('--optional-dir', type=Path, default=Path('/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data'))
     build_bundle(parser.parse_args())
 
 

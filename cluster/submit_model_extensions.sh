@@ -14,15 +14,15 @@ case "$APBS_ENABLED" in
   0) SUFFIX="_no_apbs" ;;
   *) echo "APBS_ENABLED must be 0 or 1" >&2; exit 2 ;;
 esac
-export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 export SUBSET_DIR="${SUBSET_DIR:-$PROJECT_DIR/voronoi_dataset_audit/subset_hdf5}"
 export EXTENSION_DATA="${EXTENSION_DATA:-$PROJECT_DIR/extension_data_10pct_${RUN_MODE}${SUFFIX}}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/model_extensions_10pct_${RUN_MODE}${SUFFIX}}"
-export APBS_DIR="${APBS_DIR:-/nfs/roberts/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data}"
-export PDB_ROOT="${PDB_ROOT:-/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data}"
-export ESM_ROOT="${ESM_ROOT:-/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
-export OPTIONAL_NODE_FEATURES_DIR="${OPTIONAL_NODE_FEATURES_DIR:-/home/jas485/project_pi_co54/jas485/rsasa_i_graph_data}"
-export FEATURE_DATA="${FEATURE_DATA:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
+export APBS_DIR="${APBS_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_gnn_data_store/apbs_model_data}"
+export PDB_ROOT="${PDB_ROOT:-/gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data}"
+export ESM_ROOT="${ESM_ROOT:-/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
+export OPTIONAL_NODE_FEATURES_DIR="${OPTIONAL_NODE_FEATURES_DIR:-/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data}"
+export FEATURE_DATA="${FEATURE_DATA:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
 cd "$PROJECT_DIR"
 mkdir -p "$EXPERIMENT_DIR/logs"
 if [[ -e "$EXPERIMENT_DIR/matrix.json" || -e "$EXPERIMENT_DIR/targets.txt" ]]; then

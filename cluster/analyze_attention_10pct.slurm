@@ -6,8 +6,8 @@
 #SBATCH --mem-per-cpu=10G
 #SBATCH --time=02:00:00
 #SBATCH --nice=100
-#SBATCH --output=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.out
-#SBATCH --error=/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.err
+#SBATCH --output=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.out
+#SBATCH --error=/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/voronoi_run/logs/%x_%j.err
 
 # PRIORITY 2 (second-most important -- attention interpretability). Runs
 # gate_run/analyze_attention_weights.py on the richest completed checkpoint
@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 DATA_DIR="${DATA_DIR:-$PROJECT_DIR/gate_run/subset_10pct_hdf5}"
 CHECKPOINT="${CHECKPOINT:-$PROJECT_DIR/gate_run/feature_ladder_10pct/gat4_residual_voronoi_seed7/gate_model.pt}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/gate_run/feature_ladder_10pct/attention_analysis}"

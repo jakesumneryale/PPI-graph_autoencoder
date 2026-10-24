@@ -23,7 +23,7 @@ set -euo pipefail
 CONFIG=${1:?usage: sbatch cluster/train_gate_config.slurm <config.toml> <output_root> [train_gate.py args]}
 OUTPUT_ROOT=${2:?usage: sbatch cluster/train_gate_config.slurm <config.toml> <output_root> [train_gate.py args]}
 shift 2
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 SEEDS=(7 17 27)
 SEED="${SEEDS[$(( ${SLURM_ARRAY_TASK_ID:-1} - 1 ))]}"
 LOADER_WORKERS=$(( ${SLURM_CPUS_PER_TASK:-8} - 1 ))

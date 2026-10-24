@@ -6,9 +6,9 @@
 # commit step only ever swaps in a fully-written temp copy of the graph file.
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
-GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
-PDB_BASE_DIR="${PDB_BASE_DIR:-/nfs/roberts/pi/pi_co54/jas485/uniformly_sampled_target_data}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+GRAPH_DATA_DIR="${GRAPH_DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
+PDB_BASE_DIR="${PDB_BASE_DIR:-/gpfs/boyd/pi/pi_co54/jas485/uniformly_sampled_target_data}"
 RUN_DIR="$PROJECT_DIR/voronoi_run"
 TARGETS_FILE="$PROJECT_DIR/cluster/targets.txt"
 COMMIT_MARKER_DIR="$RUN_DIR/committed"

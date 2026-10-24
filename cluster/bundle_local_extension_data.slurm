@@ -5,7 +5,7 @@
 #SBATCH --mem=16G
 #SBATCH --time=12:00:00
 set -euo pipefail
-PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 MODE="${MODE:-full}"
 BUNDLE_DIR="${BUNDLE_DIR:-$PROJECT_DIR/local_transfer_$MODE}"
 cd "$PROJECT_DIR"

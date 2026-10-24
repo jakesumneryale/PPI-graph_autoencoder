@@ -4,13 +4,13 @@
 # previous one to succeed, so a failed repair or audit stops the pipeline before any GPU
 # time is spent.
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
-export DATA_DIR="${DATA_DIR:-/nfs/roberts/project/pi_co54/jas485/ppi_processed_graphs}"
-export RSASA_DIR="${RSASA_DIR:-/nfs/roberts/project/pi_co54/jas485/rsasa_i_graph_data}"
+export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
+export DATA_DIR="${DATA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/ppi_processed_graphs}"
+export RSASA_DIR="${RSASA_DIR:-/gpfs/boyd/pi/pi_co54/jas485/rsasa_i_graph_data}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/full_pooling_repaired}"
 export AUDIT_DIR="${AUDIT_DIR:-$PROJECT_DIR/gate_run/full_pooling_audit_repaired}"
 export REPAIR_REPORTS="${REPAIR_REPORTS:-$PROJECT_DIR/gate_run/interface_degree_repair}"
-export ESM_ROOT="${ESM_ROOT:-/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
+export ESM_ROOT="${ESM_ROOT:-/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
 export ESM_SIDECARS="${ESM_SIDECARS:-$PROJECT_DIR/full_pooling_esm_sidecars_repaired}"
 export PRIOR_SPLIT="${PRIOR_SPLIT:-$PROJECT_DIR/target_splits.json}"
 export SOURCE_MATRIX="${SOURCE_MATRIX:-$PROJECT_DIR/gate_run/dockq_followup_sweep/matrix.json}"

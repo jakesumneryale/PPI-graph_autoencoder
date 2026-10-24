@@ -325,7 +325,7 @@ def main():
     p.add_argument('--pdb-root', type=Path, required=True)
     p.add_argument('--apbs-dir', type=Path)
     p.add_argument('--without-apbs', action='store_true', help='Prepare coordinates, ESM and interface degree without opening APBS stores')
-    p.add_argument('--esm-root', type=Path, default=Path('/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds'))
+    p.add_argument('--esm-root', type=Path, default=Path('/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/SS_embeds'))
     p.add_argument('--fasta-template', default='{target}_all.fasta')
     p.add_argument('--embedding-template', default='{target}.{chain}.pt')
     p.add_argument('--esm-layer', type=int, default=33)

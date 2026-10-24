@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PROJECT_DIR="${PROJECT_DIR:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder}"
+export PROJECT_DIR="${PROJECT_DIR:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder}"
 export FULL_PARENT_DIR="${FULL_PARENT_DIR:-$PROJECT_DIR/gate_run/full_pooling_validation}"
 export EXPERIMENT_DIR="${EXPERIMENT_DIR:-$PROJECT_DIR/gate_run/full_pooling_esm_validation}"
-export ESM_ROOT="${ESM_ROOT:-/nfs/roberts/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
+export ESM_ROOT="${ESM_ROOT:-/gpfs/boyd/pi/pi_co54/nb685/scratch_backup/SS_embeds}"
 export ESM_SIDECARS="${ESM_SIDECARS:-$PROJECT_DIR/full_pooling_esm_sidecars}"
 cd "$PROJECT_DIR"
 PREP_DEPENDENCY=()

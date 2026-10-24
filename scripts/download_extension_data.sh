@@ -5,7 +5,7 @@
 # No deletion, no CLI installation, and no endpoint permission changes occur.
 set -euo pipefail
 SOURCE_COLLECTION="${SOURCE_COLLECTION:-a2bf0df9-5633-4565-b083-b8907423bb77}"
-SOURCE_BUNDLE="${SOURCE_BUNDLE:-/nfs/roberts/project/pi_co54/jas485/PPI-graph_autoencoder/local_transfer_full}"
+SOURCE_BUNDLE="${SOURCE_BUNDLE:-/gpfs/boyd/pi/pi_co54/jas485/PPI-graph_autoencoder/local_transfer_full}"
 GLOBUS_BIN="${GLOBUS_BIN:-globus}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 LOCAL_ROOT="${LOCAL_ROOT:-/scratch/ppi_extension_data/full}"
