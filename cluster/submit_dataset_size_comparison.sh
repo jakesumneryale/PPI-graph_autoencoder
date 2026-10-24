@@ -6,6 +6,9 @@
 #
 # Run from the repository on a Bouchet login node, after the batch-1 graphs (with v_es) are in NEW_GRAPH_DIR:
 #   bash cluster/submit_dataset_size_comparison.sh audit     # 1-CPU array: model lists for the new graphs
+#   DEPEND=<copy job id> bash cluster/submit_dataset_size_comparison.sh audit
+#       # audit starts only if cluster/copy_expansion_graphs.slurm succeeds (afterok); the graphs are then checked
+#       # in the copy job's source (COPY_SRC) instead of NEW_GRAPH_DIR, which is still being filled
 #   bash cluster/submit_dataset_size_comparison.sh train     # check + stage data dirs, submit 2 x 3 GPU runs
 #   DRY_RUN=1 bash cluster/submit_dataset_size_comparison.sh train
 set -euo pipefail
@@ -26,14 +29,17 @@ case "$STAGE" in
 audit)
   mkdir -p "$EXP/logs" "$EXP/tasks"
   tasks="$EXP/tasks/audit_$(date +%Y%m%d_%H%M%S).txt"
+  check_dir=$NEW_GRAPH_DIR
+  [[ -n ${DEPEND:-} ]] && check_dir="${COPY_SRC:-/home/jas485/project_pi_co54/jas485/ppi_expansion_graphs}"
   missing=()
   for t in $ALL_TARGETS; do
     is_original "$t" && continue
-    if [[ -s $NEW_GRAPH_DIR/$t.hdf5 ]]; then echo "$NEW_GRAPH_DIR/$t.hdf5" >> "$tasks"; else missing+=("$t"); fi
+    if [[ -s $check_dir/$t.hdf5 ]]; then echo "$NEW_GRAPH_DIR/$t.hdf5" >> "$tasks"; else missing+=("$t"); fi
   done
-  (( ${#missing[@]} == 0 )) || { echo "Missing batch-1 graph files in $NEW_GRAPH_DIR: ${missing[*]}" >&2; exit 2; }
+  (( ${#missing[@]} == 0 )) || { echo "Missing batch-1 graph files in $check_dir: ${missing[*]}" >&2; exit 2; }
   n=$(grep -c . "$tasks")
   args=(--parsable --array="1-$n" --output="$EXP/logs/audit_%A_%a.out" --error="$EXP/logs/audit_%A_%a.err")
+  [[ -n ${DEPEND:-} ]] && args+=(--dependency="afterok:$DEPEND" --kill-on-invalid-dep=yes)
   if [[ -n ${DRY_RUN:-} ]]; then echo "sbatch ${args[*]} cluster/audit_expansion_graphs.slurm $tasks $EXP"; exit 0; fi
   echo "Submitted audit of $n batch-1 graphs: $(sbatch "${args[@]}" cluster/audit_expansion_graphs.slurm "$tasks" "$EXP")"
   echo "Model lists: $EXP/model_lists; reports: $EXP/audit"
