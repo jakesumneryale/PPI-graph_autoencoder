@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 from contextlib import nullcontext
+import copy
 import csv
 import json
 import math
 from pathlib import Path
 import random
+import shutil
 import time
 from types import SimpleNamespace
 
@@ -158,6 +160,10 @@ def bounded_split_count(total_items: int, fraction: float, min_remaining: int) -
     proposed = int(round(total_items * fraction))
     proposed = max(1, proposed)
     return min(proposed, total_items - min_remaining)
+
+
+def parse_snapshot_epochs(raw) -> set[int]:
+    return {int(e) for e in str(raw or "").split(",") if e.strip()}
 
 
 def target_name_from_path(path: Path) -> str:
@@ -866,6 +872,9 @@ def main() -> None:
                         help="Keep the test set sealed until the best validation checkpoint is chosen.")
     parser.add_argument("--no-test-evaluation", action="store_true",
                         help="Diagnostic tuning: evaluate validation only, including after training; export validation predictions.")
+    parser.add_argument("--snapshot-epochs", default="",
+                        help="Comma-separated epochs (before the last) after which the best checkpoint so far is "
+                             "evaluated on validation and test into <output-dir>/epochNN/; training then continues.")
     parser.add_argument("--dockq-weight-exponent", type=float, default=.5)
     parser.add_argument("--initialize-checkpoint", default=None)
     parser.add_argument("--evaluation-only", action="store_true")
@@ -927,6 +936,12 @@ def main() -> None:
         parser.error("rank-temperature must be positive, dockq-hinge-start in [0, 1), dockq-hinge-beta >= 1")
     if args.val_every_steps < 0 or args.decoys_per_target < 0:
         parser.error("val-every-steps and decoys-per-target must be nonnegative")
+    try:
+        snapshot_epochs = parse_snapshot_epochs(args.snapshot_epochs)
+    except ValueError:
+        parser.error("snapshot-epochs must be a comma-separated list of epoch numbers")
+    if any(not 1 <= e < args.epochs for e in snapshot_epochs):
+        parser.error("snapshot-epochs must lie between 1 and epochs - 1 (the last epoch is always evaluated)")
     if not math.isfinite(args.target_adversary_weight) or args.target_adversary_weight < 0:
         parser.error("target-adversary-weight must be finite and nonnegative")
     if not (0 <= args.edge_dropout < 1 and 0 <= args.node_feature_mask < 1 and args.ca_dist_noise >= 0):
@@ -1164,15 +1179,19 @@ def main() -> None:
 
     capri_head = None
 
-    def export_diagnostic_predictions():
+    def export_diagnostic_predictions(eval_model=None, eval_capri_head=None, out_dir=None):
+        if eval_model is None:
+            eval_model, eval_capri_head = model, capri_head
+        if out_dir is None:
+            out_dir = output_dir
         report = {}
         loaders = {"validation": val_loader}
         if args.export_training_predictions or args.evaluation_only:
             loaders["training"] = DataLoader(train_dataset, **make_dataloader_kwargs(args, device, shuffle=False))
         for split_name, loader in loaders.items():
-            rows = collect_prediction_rows(model, loader, device, args,
-                node_feature_set=args.node_feature_set, node_features=dataset.node_features, capri_head=capri_head)
-            save_prediction_rows(output_dir / f"{split_name}_predictions.csv", rows)
+            rows = collect_prediction_rows(eval_model, loader, device, args,
+                node_feature_set=args.node_feature_set, node_features=dataset.node_features, capri_head=eval_capri_head)
+            save_prediction_rows(out_dir / f"{split_name}_predictions.csv", rows)
             if args.dockq_range_diagnostics:
                 report[split_name] = prediction_report([r['true_target'] for r in rows],
                     [r['predicted_target'] for r in rows], [r['target_id'] for r in rows])
@@ -1184,8 +1203,32 @@ def main() -> None:
                             coverage[target] = dict(target=target, n=0, **{f'bin_{i}_count': 0 for i in range(5)})
                         coverage[target]['n'] += 1
                         coverage[target][f'bin_{bin_id}_count'] += 1
-                    write_csv(output_dir / 'training_target_coverage.csv', list(coverage.values()))
-        (output_dir / "prediction_metrics.json").write_text(json.dumps(report, indent=2) + "\n")
+                    write_csv(out_dir / 'training_target_coverage.csv', list(coverage.values()))
+        (out_dir / "prediction_metrics.json").write_text(json.dumps(report, indent=2) + "\n")
+
+    def export_test_predictions(eval_model, eval_capri_head, out_dir, checkpoint) -> None:
+        """Test predictions (and test metrics in prediction_metrics.json) for the checkpoint chosen on validation."""
+        test_prediction_rows = collect_prediction_rows(
+            eval_model,
+            test_loader,
+            device,
+            args,
+            node_feature_set=args.node_feature_set,
+            node_features=dataset.node_features,
+            capri_head=eval_capri_head,
+        )
+        save_prediction_rows(out_dir / "test_predictions.csv", test_prediction_rows)
+        if args.dockq_range_diagnostics:
+            metrics_path = out_dir / "prediction_metrics.json"
+            report = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
+            report["test"] = prediction_report([r["true_target"] for r in test_prediction_rows],
+                                               [r["predicted_target"] for r in test_prediction_rows],
+                                               [r["target_id"] for r in test_prediction_rows])
+            report["selected_checkpoint"] = dict(best_epoch=checkpoint["best_epoch"], best_step=checkpoint.get("best_step"),
+                                                 validation_target_mse=checkpoint["best_metric_value"])
+            metrics_path.write_text(json.dumps(report, indent=2) + "\n")
+            print(f"Test DockQ MSE at the selected checkpoint (epoch {checkpoint['best_epoch']}): "
+                  f"{report['test']['pooled_mse']:.5f}", flush=True)
 
     if args.evaluation_only:
         export_diagnostic_predictions()
@@ -1335,6 +1378,39 @@ def main() -> None:
         state.last_validated_step, state.last_val_metrics = state.global_step, val_metrics
         return val_metrics, saved
 
+    def write_snapshot(epoch: int) -> None:
+        """Mid-training results: the best checkpoint so far, evaluated like the final one, on copies of the model
+        and heads so the training state is untouched. No reconstruction evaluation (that is final-only)."""
+        snapshot_dir = output_dir / f"epoch{epoch:02d}"
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        start = time.monotonic()
+        # Iterating the evaluation loaders draws from the global RNGs; restore them afterwards so training continues
+        # exactly as it would have without the snapshot.
+        rng_states = (random.getstate(), torch.get_rng_state(),
+                      torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None)
+        shutil.copy2(checkpoint_path, snapshot_dir / checkpoint_path.name)
+        snapshot = torch.load(checkpoint_path, map_location=device)
+        snapshot_model = copy.deepcopy(model)
+        snapshot_model.load_state_dict(snapshot["model_state_dict"])
+        snapshot_capri_head = None
+        if capri_head is not None:
+            snapshot_capri_head = copy.deepcopy(capri_head)
+            snapshot_capri_head.load_state_dict(snapshot["capri_head_state_dict"])
+        export_diagnostic_predictions(snapshot_model, snapshot_capri_head, snapshot_dir)
+        if not args.no_test_evaluation:
+            export_test_predictions(snapshot_model, snapshot_capri_head, snapshot_dir, snapshot)
+        (snapshot_dir / "snapshot.json").write_text(json.dumps(dict(
+            after_epoch=epoch, global_step=state.global_step, best_epoch=snapshot["best_epoch"],
+            best_step=snapshot.get("best_step"), validation_target_mse=snapshot["best_metric_value"]), indent=2) + "\n")
+        del snapshot_model, snapshot_capri_head, snapshot
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        random.setstate(rng_states[0])
+        torch.set_rng_state(rng_states[1])
+        if rng_states[2] is not None:
+            torch.cuda.set_rng_state_all(rng_states[2])
+        print(f"Snapshot after epoch {epoch}: {snapshot_dir} ({(time.monotonic() - start) / 60:.1f} min)", flush=True)
+
     with history_path.open("w", newline="", encoding="ascii") as history_file:
         writer = csv.DictWriter(history_file, fieldnames=make_history_fieldnames(
             adversary is not None, capri=capri_head is not None, rank=bool(args.rank_loss_weight)))
@@ -1384,6 +1460,8 @@ def main() -> None:
                 message += " saved"
             message += f" ({(time.monotonic() - epoch_start) / 60:.1f} min)"
             print(message, flush=True)
+            if epoch in parse_snapshot_epochs(args.snapshot_epochs):
+                write_snapshot(epoch)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -1394,28 +1472,9 @@ def main() -> None:
     if args.no_test_evaluation:
         print(f'Diagnostic run complete; best checkpoint: {checkpoint_path}; no test evaluation.')
         return
-    # The test split is touched only here: once, with the checkpoint chosen on validation DockQ MSE.
-    test_prediction_rows = collect_prediction_rows(
-        model,
-        test_loader,
-        device,
-        args,
-        node_feature_set=args.node_feature_set,
-        node_features=dataset.node_features,
-        capri_head=capri_head,
-    )
-    save_prediction_rows(test_predictions_path, test_prediction_rows)
-    if args.dockq_range_diagnostics:
-        metrics_path = output_dir / "prediction_metrics.json"
-        report = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
-        report["test"] = prediction_report([r["true_target"] for r in test_prediction_rows],
-                                           [r["predicted_target"] for r in test_prediction_rows],
-                                           [r["target_id"] for r in test_prediction_rows])
-        report["selected_checkpoint"] = dict(best_epoch=checkpoint["best_epoch"], best_step=checkpoint.get("best_step"),
-                                             validation_target_mse=checkpoint["best_metric_value"])
-        metrics_path.write_text(json.dumps(report, indent=2) + "\n")
-        print(f"Test DockQ MSE at the selected checkpoint (epoch {checkpoint['best_epoch']}): "
-              f"{report['test']['pooled_mse']:.5f}", flush=True)
+    # The test split is touched only here (and at any --snapshot-epochs), always with the checkpoint chosen on
+    # validation DockQ MSE.
+    export_test_predictions(model, capri_head, output_dir, checkpoint)
 
     reconstruction_eval_args = SimpleNamespace(
         cluster=args.cluster,

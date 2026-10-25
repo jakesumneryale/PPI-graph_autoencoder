@@ -349,3 +349,46 @@ def test_selected_checkpoint_is_evaluated_once_on_the_test_split(tmp_path):
     assert report["test"]["pooled_mse"] == pytest.approx(np.mean((test.true_target - test.predicted_target) ** 2))
     assert report["selected_checkpoint"]["validation_target_mse"] == pytest.approx(steps.val_target_mse.min(), rel=1e-5)
     assert (out / "reconstruction_summary.csv").exists()
+
+
+def test_snapshot_epochs_evaluate_best_so_far_and_leave_training_unchanged(tmp_path):
+    import json
+    data = make_data(tmp_path)
+    base = [a for a in BASE if a != "--no-test-evaluation"]
+    base[base.index("--epochs") + 1] = "3"
+    common = ["--data", str(data), "--validation-only-during-training", "--val-every-steps", "1", *base,
+              "--rank-loss-weight", "0.1", "--targets-per-batch", "1", "--capri-head-weight", "0.2"]
+    runs = {}
+    for name, extra in (("plain", []), ("snap", ["--snapshot-epochs", "1,2"])):
+        out = tmp_path / name
+        result = subprocess.run([sys.executable, "train_gate.py", "--output-dir", str(out), *common, *extra],
+                                text=True, capture_output=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        runs[name] = out
+    out = runs["snap"]
+    # training is untouched by the snapshots: identical history and final selection
+    pd.testing.assert_frame_equal(pd.read_csv(runs["plain"] / "loss_history.csv"), pd.read_csv(out / "loss_history.csv"))
+    pd.testing.assert_frame_equal(pd.read_csv(runs["plain"] / "test_predictions.csv"), pd.read_csv(out / "test_predictions.csv"))
+    assert pd.read_csv(out / "loss_history.csv").filter(regex="^test_").isna().all().all()  # still sealed in history
+    steps = pd.read_csv(out / "validation_steps.csv")
+    for epoch in (1, 2):
+        snap = out / f"epoch{epoch:02d}"
+        best = steps[steps.epoch <= epoch].val_target_mse.min()
+        info = json.loads((snap / "snapshot.json").read_text())
+        assert info["after_epoch"] == epoch and info["best_epoch"] <= epoch
+        assert info["validation_target_mse"] == pytest.approx(best, rel=1e-5)
+        val = pd.read_csv(snap / "validation_predictions.csv")
+        test = pd.read_csv(snap / "test_predictions.csv")
+        assert np.mean((val.true_target - val.predicted_target) ** 2) == pytest.approx(best, rel=1e-5)
+        report = json.loads((snap / "prediction_metrics.json").read_text())
+        assert report["test"]["pooled_mse"] == pytest.approx(np.mean((test.true_target - test.predicted_target) ** 2))
+        assert "p_high" in test.columns and (snap / "gate_model.pt").exists()
+        assert not (snap / "reconstruction_summary.csv").exists()
+    assert (out / "reconstruction_summary.csv").exists()
+
+
+@pytest.mark.parametrize("bad", ["3", "0", "x"])
+def test_snapshot_epochs_must_precede_the_last_epoch(tmp_path, bad):
+    result = subprocess.run([sys.executable, "train_gate.py", "--data", str(tmp_path), *BASE, "--snapshot-epochs", bad],
+                            text=True, capture_output=True)
+    assert result.returncode != 0 and "snapshot-epochs" in result.stderr

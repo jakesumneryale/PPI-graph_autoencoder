@@ -43,7 +43,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     'augmentation': ('edge_dropout', 'node_feature_mask', 'ca_dist_noise'),
     'evaluation': ('checkpoint_metric', 'val_every_steps', 'validation_only_during_training', 'no_test_evaluation',
                    'dockq_range_diagnostics', 'eval_edge_threshold', 'eval_negative_ratio', 'eval_log_every',
-                   'export_training_predictions', 'initialize_checkpoint', 'evaluation_only', 'prepare_splits_only'),
+                   'export_training_predictions', 'initialize_checkpoint', 'evaluation_only', 'prepare_splits_only',
+                   'snapshot_epochs'),
     'runtime': ('device', 'output_dir', 'num_workers', 'worker_start_method', 'persistent_workers', 'prefetch_factor',
                 'cpu_threads'),
 }
