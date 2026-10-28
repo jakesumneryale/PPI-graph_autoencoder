@@ -5,7 +5,9 @@
 #   rank0.3            rank weight 0.3
 #   rank1.0            rank weight 1.0
 #   rank0.3_8decoys    rank weight 0.3, 2 targets x 8 decoys per batch (same batch size 16)
-# 12 GPU runs. Choose the winner on VALIDATION (this fold's test set has been seen); confirm it on another fold.
+#   interface_pool     control + --pooling interface (DockQ head pools interface residues only; added later,
+#                      compare with control)
+# 15 GPU runs. Choose the winner on VALIDATION (this fold's test set has been seen); confirm it on another fold.
 # See RANK_SWEEP_EXPANDED.md.
 #
 # Run from the repository on a Bouchet login node (after the dataset-size comparison's train stage has staged
@@ -13,6 +15,7 @@
 #   DRY_RUN=1 bash cluster/submit_rank_sweep_expanded.sh
 #   bash cluster/submit_rank_sweep_expanded.sh
 #   RUNS="rank1.0" bash cluster/submit_rank_sweep_expanded.sh    # a subset; existing run directories are refused
+#   RUNS="interface_pool" bash cluster/submit_rank_sweep_expanded.sh   # the added arm alone
 set -euo pipefail
 export PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 SRC="$PROJECT_DIR/gate_run/dataset_size_comparison"
@@ -41,8 +44,9 @@ declare -A RUN_ARGS=(
   [rank0.3]="--rank-loss-weight 0.3 --targets-per-batch 4"
   [rank1.0]="--rank-loss-weight 1.0 --targets-per-batch 4"
   [rank0.3_8decoys]="--rank-loss-weight 0.3 --targets-per-batch 2"
+  [interface_pool]="--rank-loss-weight 0.1 --targets-per-batch 4 --pooling interface"
 )
-for run in ${RUNS:-control rank0.3 rank1.0 rank0.3_8decoys}; do
+for run in ${RUNS:-control rank0.3 rank1.0 rank0.3_8decoys interface_pool}; do
   [[ -n ${RUN_ARGS[$run]:-} ]] || { echo "Unknown run: $run" >&2; exit 2; }
   out="$OUT_ROOT/$run"
   [[ -e $out ]] && { echo "Refusing to reuse $out; move it away first." >&2; exit 2; }

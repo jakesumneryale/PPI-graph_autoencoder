@@ -1,7 +1,7 @@
 # Ranking-loss sweep on the expanded dataset
 
-Does a stronger within-target ranking signal improve the rank model on the expanded dataset? Twelve GPU runs:
-four arms × seeds 7/17/27, 10 epochs each, all on exactly the data, split (stratified fold 1) and model lists of
+Does a stronger within-target ranking signal improve the rank model on the expanded dataset? Fifteen GPU runs:
+five arms × seeds 7/17/27, 10 epochs each, all on exactly the data, split (stratified fold 1) and model lists of
 the dataset-size comparison's `expanded` arm.
 
 | arm | ranking-loss weight | batch composition (16 graphs) |
@@ -10,6 +10,7 @@ the dataset-size comparison's `expanded` arm.
 | `rank0.3` | 0.3 | 4 × 4 |
 | `rank1.0` | 1.0 | 4 × 4 |
 | `rank0.3_8decoys` | 0.3 | 2 targets × 8 decoys |
+| `interface_pool` | 0.1 | 4 × 4, and `--pooling interface` (added later; compare with `control`) |
 
 Everything else is `configs/gate_rank.toml`, plus `--val-every-steps 6000` as in the expanded arm.
 
@@ -28,6 +29,22 @@ From the expanded arm's final results (`gate_run/analyze_dataset_size_comparison
   was ever run. It is ~1.8% of the training loss (DockQ MSE 3.8%, reconstruction ~94%), and with 4 decoys per
   target a batch has at most 24 within-target pairs (~15 usable per step). 2 × 8 raises that to at most 56 and
   includes more close-quality pairs, the comparisons that decide top-1 selection.
+
+## The interface-pooling arm
+
+Added after the first four arms were running. On the expanded model's hardest test targets (1kac, 4hwi, 1he8, 9wlp)
+predictions collapse to a flat, low value: whole targets are under-predicted by 0.13--0.21 DockQ although 36--54\% of
+their decoys are acceptable or better. Across all 61 test targets that target-level under-prediction tracks the
+interface's share of the complex (Spearman $r = +0.53$, $p = 10^{-5}$) and not the targets' actual quality
+($r = -0.10$). One explanation: combined pooling includes a whole-graph mean, and the mean of `interface_nodes` over
+all residues is the interface share, so a large complex with a small true binding patch looks "incorrect" in every
+pose, and the near-identical whole-graph summary flattens differences between its decoys. `interface_pool` removes the
+whole-graph half (the DockQ path pools interface residues only); everything else equals `control`. Check the whole-target
+offset against interface share, and those four targets, besides the overall metrics. Submit it alone:
+
+```bash
+RUNS="interface_pool" bash cluster/submit_rank_sweep_expanded.sh
+```
 
 ## 10 epochs
 
@@ -57,7 +74,10 @@ bash cluster/submit_rank_sweep_expanded.sh
 
 ## Local verification
 
-- Every arm's options resolve against `gate_rank.toml` (10 epochs, cosine over 10, rank weight, targets per batch).
+- Every arm's options resolve against `gate_rank.toml` (10 epochs, cosine over 10, rank weight, targets per batch,
+  pooling).
+- CPU training run with `--pooling interface` finishes and evaluates on test; its checkpoint's graph projector takes
+  2 × latent inputs (interface mean + max), not 4 × latent as with combined pooling.
 - CPU training runs with 4 × 2 and 2 × 4 grouped batches finish, train with the ranking loss and evaluate on test.
 - The grouped sampler uses every training decoy once per epoch in chunks of distinct decoys from one target, so on
   real data (1,300–2,000 decoys per target) both batch compositions give ~25,700 steps per epoch.

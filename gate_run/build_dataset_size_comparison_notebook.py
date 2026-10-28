@@ -540,6 +540,46 @@ save(fig, 'fig7a_style_average_rho')
 display(paper.loc[order].rename(columns={'mean': 'mean rho (paper sign)', 'std': 'SD over targets', 'size': 'targets'}).round(3))
 ''')
 
+md(r'''### Per-target $\rho$, in the style of Fig. 4 of the PRE paper
+
+Every test target, every method on the same decoys, raw-score $\rho$ as in the paper (more negative is better; GATE's
+predicted DockQ negated; GATE = mean over the three seeds). Targets are ordered left to right by increasing
+$\langle\rho\rangle$ of **ZRank2, PyDock and Rosetta** (black line; black vertical lines = SD over those three), so
+the ordering is a classical-difficulty scale independent of GATE. GATE is overlaid in filled gray (dark: expanded;
+light: original only). Tick labels are the target PDB IDs; their group (H/O/N) is in the CSV export.''')
+
+code(r'''
+F4 = {'ZRank2': dict(marker='^', color='#191970', label='ZRank2'),
+      'Rosetta': dict(marker='s', color='#228B22', label='Rosetta'),
+      'PyDock': dict(marker='h', color='#FF8C00', label='PyDock'),
+      'expanded': dict(marker='o', color='0.25', label='GATE (expanded)'),
+      'original_only': dict(marker='o', color='0.72', label='GATE (original)')}
+w4 = cmp_t.assign(rho_paper=-cmp_t.rho).pivot_table(index='target', columns='method', values='rho_paper')
+w4['avg'] = w4[CLASSICAL].mean(axis=1); w4['sd'] = w4[CLASSICAL].std(axis=1, ddof=0)
+w4 = w4.sort_values('avg'); x4 = np.arange(1, len(w4) + 1)
+w4.assign(order=x4, group=w4.index.map(group_of)).to_csv(EXPORT / 'fig4_style_per_target_rho.csv')
+
+fig, ax = plt.subplots(figsize=(26, 9.5))
+for m in CLASSICAL:
+    st = F4[m]
+    ax.scatter(x4, w4[m], marker=st['marker'], s=130, facecolors='none', edgecolors=st['color'], lw=1.3, label=st['label'], zorder=3)
+for m in ['original_only', 'expanded']:
+    st = F4[m]
+    ax.scatter(x4, w4[m], marker=st['marker'], s=110, color=st['color'], edgecolors='black', lw=.6, label=st['label'], zorder=4)
+ax.vlines(x4, w4.avg - w4.sd, w4.avg + w4.sd, color='0.3', lw=1.6, zorder=2)
+ax.plot(x4, w4.avg, color='black', marker='.', ms=7, lw=1.8, label=r'Average (ZRank2, PyDock, Rosetta)', zorder=5)
+ax.yaxis.grid(True, ls='--', lw=.6, color='black'); ax.set_axisbelow(True)
+ax.set_xlim(.3, len(w4) + .7); ax.set_xticks(x4, [t.upper() for t in w4.index], rotation=90, fontsize=14)
+ax.set_xlabel('Test target'); ax.set_ylabel(r'$\rho$', fontsize=30)
+ax.legend(loc='upper left', fontsize=17, markerscale=1.4, frameon=True, framealpha=.9)
+save(fig, 'fig4_style_per_target_rho')
+
+beat = pd.DataFrame({m: [(w4[g] < w4[m]).sum() for g in ('expanded', 'original_only')] for m in CLASSICAL},
+                    index=['GATE expanded better on', 'GATE original better on'])
+display(Markdown(f'Targets (of {len(w4)}) where GATE has a more negative $\\rho$ than each scoring function:'))
+display(beat)
+''')
+
 md(r'''## Epoch 10 vs final
 
 Runs with both evaluations: the epoch of the selected checkpoint and test metrics at each stage. If the best
