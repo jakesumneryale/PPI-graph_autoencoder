@@ -32,13 +32,17 @@ def read_sidecar(directory,target,name,graph):
 
 def prepare(parent, target, esm_root, output):
     import torch
-    from prepare_model_extensions import load_embeddings
     torch.set_num_threads(1);torch.set_num_interop_threads(1)
     matrix=json.loads((parent/'matrix.json').read_text());argv=matrix['runs'][0]['argv']
     def value(flag):return argv[argv.index(flag)+1]
     paths=[Path(p) for p in json.loads((parent/'paths.json').read_text())]
     path=next(p for p in paths if p.stem==target)
     names=sorted(n for n in (Path(value('--model-list-dir'))/f'{target}.txt').read_text().splitlines() if n)
+    build_target(path,names,target,esm_root,output)
+
+
+def build_target(path, names, target, esm_root, output):
+    from prepare_model_extensions import load_embeddings
     output.mkdir(parents=True,exist_ok=True)
     final=output/f'{target}.hdf5'
     # Outputs are rebuilt atomically; existing graph data is never modified.
@@ -70,7 +74,17 @@ def prepare(parent, target, esm_root, output):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--parent',type=Path,required=True);p.add_argument('--task',type=int,required=True)
+    p.add_argument('--parent',type=Path,help='Experiment directory with matrix.json and paths.json (with --task)')
+    p.add_argument('--task',type=int)
+    p.add_argument('--graph',type=Path,help='One graph file, instead of --parent/--task (with --model-list-dir)')
+    p.add_argument('--model-list-dir',type=Path)
     p.add_argument('--esm-root',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args();paths=json.loads((a.parent/'paths.json').read_text())
-    prepare(a.parent,Path(paths[a.task-1]).stem,a.esm_root,a.output)
+    a=p.parse_args()
+    if a.graph:
+        import torch
+        torch.set_num_threads(1);torch.set_num_interop_threads(1)
+        names=sorted(n for n in (a.model_list_dir/f'{a.graph.stem}.txt').read_text().splitlines() if n)
+        build_target(a.graph,names,a.graph.stem,a.esm_root,a.output)
+    else:
+        paths=json.loads((a.parent/'paths.json').read_text())
+        prepare(a.parent,Path(paths[a.task-1]).stem,a.esm_root,a.output)

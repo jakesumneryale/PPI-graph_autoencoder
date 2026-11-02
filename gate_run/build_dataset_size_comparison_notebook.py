@@ -736,15 +736,13 @@ text = '\n'.join(lines); display(Markdown(text)); _ = (EXPORT / 'readout.md').wr
 ''')
 
 md(r'''
-## Interpretation (epoch-10 snapshot, 27 October 2026)
-
-Written when original only had finished and the expanded arms were at epochs 13--17; revisit when all runs are final.
+## Interpretation (final, all 9 runs at 20 epochs, 29 October 2026)
 
 **More data helps, beyond the leakage.** Over all 61 test targets the expanded arm improves $\langle\rho\rangle$ by
-about 0.05 and lowers test MSE by about 14\% (0.040 vs 0.046), with seed spreads far smaller than the gap. The gain
-is largest on the 8 original targets whose training-only homologs it saw ($\Delta\rho \approx +0.18$), which is
-leakage by design. On the targets without that advantage the effect is smaller but present: $\Delta\rho \approx +0.035$
-on the 37 new targets (interval excludes zero) and $\approx +0.03$ on the 16 clean original targets (interval
+about 0.05 and lowers test MSE by about 16\% (0.040 vs 0.047), with seed spreads far smaller than the gap. The gain
+is largest on the 8 original targets whose training-only homologs it saw ($\Delta\rho \approx +0.20$), which is
+leakage by design. On the targets without that advantage the effect is smaller but present: $\Delta\rho \approx +0.033$
+on the 37 new targets (interval excludes zero) and $\approx +0.02$ on the 16 clean original targets (interval
 includes zero, with unchanged MSE but a better top-1 pick). The expanded model also catches more true high-quality
 decoys.
 
@@ -756,14 +754,15 @@ standard width on the same data it is worse on the new targets and no better els
 the expanded model ranks decoys about as well as ZRank2 ($\langle\rho\rangle$ 0.76 vs 0.75; ahead only on the
 homolog group, behind on the 16 clean original targets) and better than PyDock (0.65) and Rosetta (0.42). Rosetta
 behaves differently from the rest: the worst ranker overall (0.25 on new targets) but by far the best at picking
-the single best decoy (mean top-1 DockQ 0.82 vs 0.58--0.59 for GATE expanded and ZRank2). On the new targets a
+the single best decoy (mean top-1 DockQ 0.82 vs 0.59--0.60 for GATE expanded and ZRank2). On the new targets a
 median 98\% of its 50 best-scored decoys are medium or high quality, while the incorrect poses get widely scattered
 (sometimes very large) energies, which scrambles the overall ranking. GATE's top-1 lags because its predictions
 saturate around 0.6--0.8 for many near-native decoys (see the per-target panels), so the top pick among them is
 close to arbitrary.
 
-**Ten epochs are about enough.** The original-only runs gained nothing on test between epoch 10 and 20, and the
-expanded runs' best validation checkpoints so far are mostly from epochs 4--12.
+**Ten epochs are about enough.** Training to 20 epochs moved the selected checkpoint past epoch 10 in only 3 of 9
+runs (original only 2/3, expanded 1/3, wide 0/3), and none of those moves improved test: the two original-only
+seeds got slightly worse test MSE, and expanded seed 7 was unchanged.
 
 ## Limitations
 
@@ -777,7 +776,6 @@ expanded runs' best validation checkpoints so far are mostly from epochs 4--12.
 - **More data also means more steps.** At equal epochs the expanded arms take about 3$\times$ more optimizer steps
   than original only.
 - **The test set is now spent** for these choices. Later tuning should be judged on validation or on other folds.
-- **Epoch-10 numbers are a snapshot**; runs still training are rerun into the final stage by pulling and rebuilding.
 ''')
 
 notebook = nbf.v4.new_notebook(cells=cells, metadata={'kernelspec': {'display_name': 'Python 3', 'language': 'python', 'name': 'python3'}})

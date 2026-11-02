@@ -555,6 +555,7 @@ def evaluate_checkpoint(
         edge_feature_transforms=edge_feature_transforms,
         edge_feature_stats=edge_feature_stats,
         use_esm=checkpoint_args.get("use_esm", False),
+        esm_sidecar_dir=checkpoint_args.get("esm_sidecar_dir"),
         require_pos=checkpoint_args.get("architecture", "gat") == "egnn",
     )
     print(
